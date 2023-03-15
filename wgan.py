@@ -1,3 +1,6 @@
+# MIT License
+# Copyright (c) 2023 saysaysx
+
 # WGAN with clips comments and проверкой на условие липшица
 import matplotlib.pyplot as plt
 import tensorflow.keras as krs
