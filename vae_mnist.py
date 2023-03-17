@@ -1,3 +1,7 @@
+# MIT License
+# Copyright (c) 2023 saysaysx
+
+
 import matplotlib.pyplot as plt
 import tensorflow.keras as krs
 
