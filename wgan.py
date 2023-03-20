@@ -75,7 +75,7 @@ lay_out = krs.layers.Dense(1, activation="linear", name='den4')(lay)
 
 descriminator = krs.Model(desc_input, lay_out)
 descriminator.trainable = True
-descriminator.compile(loss=model_wloss_descr(descriminator.input), optimizer=tf.keras.optimizers.legacy.RMSprop(0.0001), metrics=['accuracy'])
+descriminator.compile(loss=model_wloss_descr(descriminator.input), optimizer=tf.keras.optimizers.RMSprop(0.0001), metrics=['accuracy'])
 gen_input = krs.layers.Input(shape=(num_hide,))
 lay = krs.layers.Dense(128*7*7)(gen_input)
 lay = krs.layers.Reshape(target_shape=(7,7,128))(lay)
@@ -94,7 +94,7 @@ gan = descriminator(generator.layers[-1].output)
 gan_model = krs.Model(inputs=generator.layers[0].input, outputs=gan)
 
 # binary_crossentropy
-gan_model.compile(loss = model_wloss_gan(generator.layers[-1].output), optimizer=krs.optimizers.legacy.RMSprop(0.0001),
+gan_model.compile(loss = model_wloss_gan(generator.layers[-1].output), optimizer=krs.optimizers.RMSprop(0.0001),
                   metrics=['accuracy'])
 
 # binary_crossentropy

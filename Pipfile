@@ -4,13 +4,17 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-numpy = "*"
-tensorflow = "*"
+keras = "==2.8.0"
+tensorflow-gpu =  "==2.8.0"
+protobuf = "==3.20.1"
+numpy = "==1.23.0"
 matplotlib = "*"
 pandas = "*"
 pydot = "*"
 xlwt = "*"
-
+opencv-python-headless = "*"
+opencv-python = "*"
+gym = "*"
 [dev-packages]
 
 [requires]
