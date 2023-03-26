@@ -15,6 +15,7 @@ xlwt = "*"
 opencv-python-headless = "*"
 opencv-python = "*"
 gym = "*"
+scipy = "*"
 [dev-packages]
 
 [requires]
