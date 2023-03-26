@@ -212,13 +212,17 @@ class ppo:
         tf.keras.utils.plot_model(self.model, to_file='./out/actor_critic.png', show_shapes=True)
 
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.00025)
+        self.learn_rates = [1.0, 0.05]
+        self.c_entrs = [1.0,  0.05]
+        self.learn_rate = 1.0
+        self.c_entr = 1.0
 
         self.n_models = 5
         self.models = [keras.models.clone_model(self.model)  for i in range(self.n_models)]
         self.max_rewards = numpy.zeros((self.n_models))
         self.models_time = numpy.zeros((self.n_models))
 
-        #self.model.load_weights("./out/name.h5")
+        #self.model.load_weights("./out/name1.h5")
 
 
         self.nwin = "Main"
@@ -323,11 +327,12 @@ class ppo:
             loss_vst = tf.reduce_sum(tf.maximum(loss_vst1, loss_vst2))
             loss_entr = tf.reduce_sum(entr)
 
-            loss_value = loss_value + 0.015*loss_entr + 0.5*loss_vst + 0.1*ls
+            loss_value = loss_value + 0.015*self.c_entr*loss_entr + 0.5*loss_vst + 0.01*ls
             trainable_vars = self.model.trainable_variables
         grads = tape.gradient(loss_value, trainable_vars)
         #grads, gnorm = tf.clip_by_global_norm(grads, 5.0)
-        self.optimizer.apply_gradients(zip(grads, trainable_vars))
+
+        self.optimizer.apply_gradients(zip([self.learn_rate*grad for grad in grads], trainable_vars))
 
         return loss_value, loss_entr, loss_vst, kb
 
@@ -463,7 +468,7 @@ class ppo:
 
         if self.index%10==0:
 
-            print(f"step is {self.index}")
+            print(f"step is {self.index} lr {self.learn_rate}  centr {self.c_entr}")
             print(f"rewards sum is {self.all_rewards.sum(axis=1).mean()}  rewards mean  {self.all_rewards.mean(axis=1).mean()}")
             rew = 0
             for i in range(self.N):
@@ -478,7 +483,10 @@ class ppo:
             #print(f"valuef {res1}")
             #print(f"valuef {res2}")
             if(self.index%500==0 and self.index>500):
-                self.model.save_weights("./out/name.h5")
+                self.model.save_weights("./out/name1.h5")
+                num = int(numpy.random.random()*len(self.c_entrs))
+                self.c_entr = self.c_entrs[num]
+                self.learn_rate = self.learn_rates[num]
 
         self.index = self.index +  1
 
