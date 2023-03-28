@@ -1,5 +1,6 @@
 # MIT License
 # Copyright (c) 2023 saysaysx
+import random
 
 #I can’t understand why this code is so slow compared to those given in the articles,
 # training requires more than 100 million received frames, while memory consumption
@@ -212,10 +213,12 @@ class ppo:
         tf.keras.utils.plot_model(self.model, to_file='./out/actor_critic.png', show_shapes=True)
 
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.00025)
-        self.learn_rates = [1.0, 0.05]
-        self.c_entrs = [1.0,  0.05]
+        self.learn_rates = [1.0, 0.5, 0.25, 0.1, 0.05, 0.01, 0.005]
+        self.c_entrs = [1.0, 0.5, 0.25, 0.1, 0.05, 0.01, 0.005]
+        self.ratemax = [1,1,1,1,1,1,1]
         self.learn_rate = 1.0
         self.c_entr = 1.0
+        self.num_c = 0
 
         self.n_models = 5
         self.models = [keras.models.clone_model(self.model)  for i in range(self.n_models)]
@@ -353,9 +356,6 @@ class ppo:
         N = self.N
 
 
-
-
-
         pstates = self.previous_states.reshape(N*T, *self.shape_state)
 
 
@@ -434,23 +434,22 @@ class ppo:
                         mini = self.max_rewards.argmin()
                         rewm = self.all_dif_rewards.mean()
                         maxi = self.max_rewards.argmax()
-
-
-
-
-
-
                         self.max_rewards[mini] = rewm
                         self.models_time[mini] = 0
                         self.models[mini].set_weights(self.model.get_weights())
-
-
                         self.models_time = self.models_time+1.0
-
-
-
-
                         self.cur_dif_step = 0
+                        ratemax = numpy.array(self.ratemax)
+                        ratemax = ratemax/ ratemax.sum()
+                        if rewm>self.max_rewards.mean():
+                            self.ratemax[self.num_c] +=1
+
+                        num = numpy.random.choice([0,1,2,3,4,5,6], size=1,p = ratemax)[0]
+                        self.num_c = num
+                        self.c_entr = self.c_entrs[num]
+                        self.learn_rate = self.learn_rates[num]
+
+
 
 
                     if(self.cur_step[i]>=self.NSTEP):
@@ -468,7 +467,7 @@ class ppo:
 
         if self.index%10==0:
 
-            print(f"step is {self.index} lr {self.learn_rate}  centr {self.c_entr}")
+            print(f"step is {self.index} lr {self.learn_rate}   ratemax {self.ratemax}")
             print(f"rewards sum is {self.all_rewards.sum(axis=1).mean()}  rewards mean  {self.all_rewards.mean(axis=1).mean()}")
             rew = 0
             for i in range(self.N):
@@ -484,9 +483,6 @@ class ppo:
             #print(f"valuef {res2}")
             if(self.index%500==0 and self.index>500):
                 self.model.save_weights("./out/name1.h5")
-                num = int(numpy.random.random()*len(self.c_entrs))
-                self.c_entr = self.c_entrs[num]
-                self.learn_rate = self.learn_rates[num]
 
         self.index = self.index +  1
 
