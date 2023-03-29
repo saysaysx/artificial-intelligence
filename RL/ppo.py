@@ -443,6 +443,9 @@ class ppo:
                         ratemax = ratemax/ ratemax.sum()
                         if rewm>self.max_rewards.mean():
                             self.ratemax[self.num_c] +=1
+                        else:
+                            if self.ratemax[self.num_c]>1:
+                                self.ratemax[self.num_c] -=1
 
                         num = numpy.random.choice([0,1,2,3,4,5,6], size=1,p = ratemax)[0]
                         self.num_c = num
@@ -482,7 +485,7 @@ class ppo:
             #print(f"valuef {res1}")
             #print(f"valuef {res2}")
             if(self.index%500==0 and self.index>500):
-                self.model.save_weights("./out/name1.h5")
+                self.model.save_weights("./out/name2.h5")
 
         self.index = self.index +  1
 
