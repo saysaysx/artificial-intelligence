@@ -213,14 +213,19 @@ class ppo:
         tf.keras.utils.plot_model(self.model, to_file='./out/actor_critic.png', show_shapes=True)
 
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.00025)
-        self.learn_rates = [1.0, 0.5, 0.25, 0.1, 0.05, 0.01, 0.005]
-        self.c_entrs = [1.0, 0.5, 0.25, 0.1, 0.05, 0.01, 0.005]
-        self.ratemax = [1,1,1,1,1,1,1]
+        self.rates = [1.0, 0.5, 0.25, 0.1, 0.05, 0.01, 0.005]
+        self.entr_num = 0
+        self.learn_num = 0
+
+
         self.learn_rate = 1.0
         self.c_entr = 1.0
-        self.num_c = 0
+
 
         self.n_models = 5
+        self.learn_nums = [i for i in range(self.n_models)]
+        self.entr_nums = [i for i in range(self.n_models)]
+
         self.models = [keras.models.clone_model(self.model)  for i in range(self.n_models)]
         self.max_rewards = numpy.zeros((self.n_models))
         self.models_time = numpy.zeros((self.n_models))
@@ -433,25 +438,47 @@ class ppo:
 
                         mini = self.max_rewards.argmin()
                         rewm = self.all_dif_rewards.mean()
-                        maxi = self.max_rewards.argmax()
+
+
+
+
+
+                        self.entr_nums[mini] = self.entr_num
+                        self.learn_nums[mini] = self.learn_num
+
+                        num1 = self.max_rewards.argmax()
+                        num2 = int(len(self.max_rewards)*numpy.random.random())
+
+                        def set_rand(num1,num2,val):
+                            al = numpy.random.random()
+                            x = val[num1]*al+val[num2]*(1-al)
+                            x = x + (numpy.random.random()-0.5)*3
+                            x = int(x)
+                            if x<0: x = 0
+                            if x>=len(self.rates): x = len(self.rates)-1
+                            return x
+
+                        entr_num  = self.entr_num
+                        learn_num = self.learn_num
+                        self.entr_num = set_rand(num1,num2, self.entr_nums)
+                        self.learn_num = set_rand(num1,num2, self.learn_nums)
+
+                        if self.max_rewards[mini] > rewm:
+                            if entr_num==self.entr_num and self.entr_num<len(self.rates)-1:
+                                self.entr_num = self.entr_num+1
+                            if learn_num==self.learn_num and self.learn_num<len(self.rates)-1:
+                                self.learn_num = self.learn_num+1
+
+
+
+                        self.learn_rate = self.rates[self.learn_num]
+                        self.c_entr = self.rates[self.entr_num]
+
                         self.max_rewards[mini] = rewm
                         self.models_time[mini] = 0
                         self.models[mini].set_weights(self.model.get_weights())
                         self.models_time = self.models_time+1.0
                         self.cur_dif_step = 0
-                        ratemax = numpy.array(self.ratemax)
-                        ratemax = ratemax/ ratemax.sum()
-                        if rewm>self.max_rewards.mean():
-                            self.ratemax[self.num_c] +=1
-                        else:
-                            if self.ratemax[self.num_c]>1:
-                                self.ratemax[self.num_c] -=1
-
-                        num = numpy.random.choice([0,1,2,3,4,5,6], size=1,p = ratemax)[0]
-                        self.num_c = num
-                        self.c_entr = self.c_entrs[num]
-                        self.learn_rate = self.learn_rates[num]
-
 
 
 
@@ -470,7 +497,7 @@ class ppo:
 
         if self.index%10==0:
 
-            print(f"step is {self.index} lr {self.learn_rate}   ratemax {self.ratemax}")
+            print(f"step is {self.index} lr {self.learn_rate} c_entr {self.c_entr}  nums {self.learn_nums} {self.entr_nums}")
             print(f"rewards sum is {self.all_rewards.sum(axis=1).mean()}  rewards mean  {self.all_rewards.mean(axis=1).mean()}")
             rew = 0
             for i in range(self.N):
