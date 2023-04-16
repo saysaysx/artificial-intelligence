@@ -32,7 +32,10 @@ print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
 gpus = tf.config.list_physical_devices('GPU')
 print("GPUs Available: ", gpus)
 
-tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
+#tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
+#tf.config.experimental.set_visible_devices(gpus[1], 'GPU')
+
+
 
 import tensorflow.keras as keras
 from tensorflow.keras.layers import Dense, Input, concatenate, BatchNormalization, Dropout, Conv2D, Reshape, Flatten
@@ -195,6 +198,7 @@ class ppo:
         self.rewards_step = [[0] for i in range(self.N)]
 
 
+
         inp = Input(shape = self.shape_state)
         lay = Conv2D(16,(8,8), strides = (4,4),activation= 'relu',padding='same') (inp)
         lay = Conv2D(32,(4,4), strides = (2,2), activation= 'relu',padding='same') (lay)
@@ -265,7 +269,7 @@ class ppo:
         self.max_rewards = numpy.zeros((self.n_models))
         self.models_time = numpy.zeros((self.n_models))
 
-        #self.model.load_weights("./out/name2.h5")
+        self.model.load_weights("./out/name2.h5")
 
 
         self.nwin = "Main"
@@ -344,7 +348,7 @@ class ppo:
     def train_actor(self, inp, adv, acts, pol, vst, value_old):
         with tf.GradientTape(persistent=True) as tape:
             y_pi, v, im = self.model(inp, training = True)
-            #y_pin, _ = self.modelm(inp, training = False)
+
 
             actn  = tf.reshape(acts, (acts.shape[0],1))
             advm = tf.reduce_mean(adv)
@@ -429,9 +433,10 @@ class ppo:
         for i in range(16):
             #int(numpy.random.random()*self.n_models)
 
-            self.modelm = self.models[nc]
+
 
             j = i#int(numpy.random.random()*EP)
+
             index = list(range(j*S,S*(j+1)))
             st_c = tf.stop_gradient(tf.cast(pstates[index] ,tf.float32))
             adv_c = tf.stop_gradient(tf.cast(adv[index] ,tf.float32))
@@ -440,13 +445,7 @@ class ppo:
             vst_c = tf.stop_gradient(tf.cast(vst[index] ,tf.float32))
             val_old_c = tf.stop_gradient(tf.cast(val_old[index] ,tf.float32))
 
-            #xw = self.model.get_weights()
             _,_,_, ret = self.train_actor(st_c, adv_c, acts_c, pol_c, vst_c, val_old_c)
-
-            #xw = self.model.get_weights()
-            #if ret>0.001:
-            #    self.model.set_weights(xw)
-
 
 
         return
@@ -542,7 +541,7 @@ class ppo:
                     self.show(i)
 
         self.learn_all()
-        sess.graph.finalize()
+
 
         if self.index%10==0:
 
