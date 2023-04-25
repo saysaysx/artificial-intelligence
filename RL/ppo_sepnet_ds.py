@@ -200,44 +200,56 @@ class ppo:
         #self.strategy = tf.distribute.MirroredStrategy()
         #with self.strategy.scope():
         inp = Input(shape = self.shape_state)
-        lay = Conv2D(16,(8,8), strides = (4,4),activation= 'relu',padding='same') (inp)
-        lay = Conv2D(32,(4,4), strides = (2,2), activation= 'relu',padding='same') (lay)
-        lay1v = Conv2D(64,(3,3), strides = (2,2), activation= 'relu',padding='same') (lay)
+        lay = Conv2D(8,(8,8), strides = (4,4),activation= 'relu',padding='same') (inp)
+        lay = Conv2D(16,(4,4), strides = (2,2), activation= 'relu',padding='same') (lay)
+        lay1v = Conv2D(32,(3,3), strides = (1,1), activation= 'relu',padding='same') (lay)
+
         lay1 = Flatten() (lay1v)
         self.modelA1 = keras.Model(inputs=inp, outputs=[lay1])
 
-        lay = Conv2D(16,(8,8), strides = (4,4),activation= 'relu',padding='same') (inp)
-        lay = Conv2D(32,(4,4), strides = (2,2), activation= 'relu',padding='same') (lay)
-        lay2v = Conv2D(64,(3,3), strides = (2,2), activation= 'relu',padding='same') (lay)
+        lay = Conv2D(8,(8,8), strides = (4,4),activation= 'relu',padding='same') (inp)
+
+
+        lay = Conv2D(16,(4,4), strides = (2,2), activation= 'relu',padding='same') (lay)
+        lay2v = Conv2D(32,(3,3), strides = (2,2), activation= 'relu',padding='same') (lay)
         lay2 = Flatten() (lay2v)
         self.modelB1 = keras.Model(inputs=inp, outputs=[lay2])
 
 
-        lay = Conv2D(16,(8,8), strides = (4,4),activation= 'relu',padding='same') (inp)
-        lay = Conv2D(32,(4,4), strides = (2,2), activation= 'relu',padding='same') (lay)
-        lay3v = Conv2D(64,(3,3), strides = (2,2), activation= 'relu',padding='same') (lay)
-
-
-
+        lay = Conv2D(8,(8,8), strides = (4,4),activation= 'relu',padding='same') (inp)
+        lay = Conv2D(16,(4,4), strides = (2,2), activation= 'relu',padding='same') (lay)
+        lay3v = Conv2D(32,(3,3), strides = (2,2), activation= 'relu',padding='same') (lay)
 
         def dconv(filt,size,x, strides=2):
             y = keras.layers.UpSampling2D(size=strides)(x)
-            y = keras.layers.Conv2D(filters = filt,kernel_size=size,padding='same') (y)
+            y = keras.layers.Conv2D(filters = filt,kernel_size=size,activation = 'tanh',padding='same') (y)
+
             return y
 
-        layc = dconv(64,3,lay3v,strides=2)
-        layc = dconv(32,4,layc,strides=2)
+        inp_act = Input(shape = (1,))
+        laya = Dense(6*6*32, activation = 'linear') (inp_act)
+        laya = keras.layers.Reshape((6,6,32)) (laya)
+        laya = keras.layers.Concatenate() ([laya,lay3v])
+
+        layc = dconv(32,3,laya,strides=2)
+        layc = dconv(16,4,layc,strides=2)
         layc = dconv(4,8,layc,strides=4)
-        layc = keras.layers.Conv2D(filters = 4,kernel_size=5,padding='same',activation='tanh') (layc)
+        layc = keras.layers.Conv2D(filters = 4,kernel_size=5,padding='same',activation='linear') (layc)
         layc = keras.layers.Cropping2D(cropping=((6, 6), (6, 6))) (layc)
-        self.modelC = keras.Model(inputs=inp, outputs=[layc])
+
+
+
+
+        self.modelC = keras.Model(inputs=[inp, inp_act], outputs=[layc])
 
 
         layc3 = Flatten() (lay3v)
-        layc3 = Dense(128, activation = 'relu') (layc3)
+        layc3 = Dense(256, activation = 'relu') (layc3)
 
-        layc1 = Dense(128, activation = 'relu') (lay1)
-        layc2 = Dense(128, activation = 'relu') (lay2)
+
+
+        layc1 = Dense(512, activation = 'relu') (lay1)
+        layc2 = Dense(512, activation = 'relu') (lay2)
 
         layc1 = keras.layers.Concatenate() ([layc1,layc3])
         layc2 = keras.layers.Concatenate() ([layc2,layc3])
@@ -249,11 +261,12 @@ class ppo:
         self.modelB2 = keras.Model(inputs=inp, outputs=[layv])
         self.modelAB = keras.Model(inputs=inp, outputs=[layp, layv])
 
-        self.model = keras.Model(inputs=inp, outputs=[layp, layv, layc])
+        self.model = keras.Model(inputs=[inp, inp_act], outputs=[layp, layv, layc])
 
         tf.keras.utils.plot_model(self.model, to_file='./out/actor_critic_s.png', show_shapes=True)
 
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.00025)
+        self.optimizerC = tf.keras.optimizers.Adam(learning_rate=0.00025)
 
         self.rates = [1.0, 0.5, 0.25, 0.1, 0.05, 0.01, 0.005]
         self.entr_num = 0
@@ -326,7 +339,7 @@ class ppo:
         sig = vst - value
         adv = numpy.zeros(sig.shape)
 
-        lam = 0.95
+        lam = 0.99
         adv[:,T-1] = sig[:,T-1]
         for i in range(T-2, -1, -1):
             adv[:,i] = sig[:,i] + lam*self.gamma*adv[:,i+1]*(1-self.dones[:,i])
@@ -349,11 +362,11 @@ class ppo:
 
         with tf.device("GPU:0"):
             with tf.GradientTape() as tape1:
-                im = self.modelC(inp)
-                loss_valueC = tf.reduce_mean(tf.square(im-inp))
+                im1 = self.modelC([inp, acts])
+                loss_valueC = tf.reduce_mean(tf.square(im1-inp))
             trainable_varsC = self.modelC.trainable_variables
             gradsC = tape1.gradient(loss_valueC, trainable_varsC)
-            self.optimizer.apply_gradients(zip(gradsC, trainable_varsC))
+            self.optimizerC.apply_gradients(zip(gradsC, trainable_varsC))
 
 
         with tf.device("GPU:0"):
@@ -374,7 +387,7 @@ class ppo:
 
                 relmin = tf.minimum(rel*advs,relclip*advs)
                 loss_value = -tf.reduce_sum(relmin)
-                entr = tf.reduce_sum(y_pi*tf.math.log(y_pi+1e-8),axis=1)
+                entr = tf.reduce_sum(y_pi*tf.math.log(y_pi+1e-18),axis=1)
                 kb = tf.math.reduce_max(tf.reduce_sum((y_pi-pol)*tf.math.log((y_pi)/(pol)),axis=1))
                 #kb = tf.abs(tf.reduce_mean(tf.math.log(pol/y_pi)))
                 #ls = tf.reduce_mean(tf.reduce_sum(y_pi*(tf.math.log(y_pi+1e-12)-tf.math.log(y_pin+1e-12)), axis=1))
@@ -383,7 +396,7 @@ class ppo:
                 loss_entr = tf.reduce_sum(entr)
 
 
-                loss_valueA = loss_value + 0.01*self.c_entr*loss_entr #+ 0.01*ls
+                loss_valueA = loss_value + 0.015*self.c_entr*loss_entr #+ 0.01*ls
 
 
 
@@ -397,10 +410,13 @@ class ppo:
         with tf.device("GPU:0"):
             with tf.GradientTape() as tapeB:
                 v = self.modelB2(inp)
-                val = value_old+ tf.clip_by_value(v - value_old,-22.5,22.5)
+
+                val = value_old+ tf.clip_by_value(v - value_old,-1.0,1.0)
+
                 loss_vst1 = (vst - v)**2
                 loss_vst2 = (vst - val)**2
                 loss_vst = tf.reduce_sum(tf.maximum(loss_vst1, loss_vst2))
+
                 loss_valueB = loss_vst
             gradsB = tapeB.gradient(loss_valueB, trainable_varsB)
 
@@ -430,6 +446,7 @@ class ppo:
 
 
         pstates = self.previous_states.reshape(N*T, *self.shape_state)
+        #states = self.states.reshape(N*T, *self.shape_state)
 
 
         vst = self.calc_value_delta(self.values)
@@ -455,6 +472,7 @@ class ppo:
 
             index = list(range(j*S,S*(j+1)))
             st_c = tf.stop_gradient(tf.cast(pstates[index] ,tf.float32))
+            #st_cnext = tf.stop_gradient(tf.cast(states[index] ,tf.float32))
             adv_c = tf.stop_gradient(tf.cast(adv[index] ,tf.float32))
             acts_c = tf.stop_gradient(tf.cast(acts[index] ,tf.int32))
             pol_c = tf.stop_gradient(tf.cast(pol[index] ,tf.float32))
