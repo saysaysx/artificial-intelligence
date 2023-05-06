@@ -14,8 +14,11 @@ pydot = "*"
 xlwt = "*"
 opencv-python-headless = "*"
 opencv-python = "*"
-gym = "*"
+
 scipy = "*"
+
+gymnasium = "*"
+
 [dev-packages]
 
 [requires]
