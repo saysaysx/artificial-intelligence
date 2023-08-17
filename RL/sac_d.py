@@ -110,7 +110,7 @@ class environment():
     def state(self):
         state = self.field
 
-        return (( state - self.state_min) / (self.state_max - self.state_min))
+        return state#(( state - self.state_min) / (self.state_max - self.state_min))
 
     def get_shape_state(self):
 
@@ -142,7 +142,7 @@ class sac:
         self.start_time = time.time()
 
         self.T = 512
-        self.n_buffer = 100000
+        self.n_buffer = 50000
         self.buf_index  = 0
         self.flag_buf = False
 
@@ -152,8 +152,8 @@ class sac:
         self.acts = numpy.zeros((self.n_buffer, 1),dtype=numpy.float32)
         self.policies = numpy.zeros((self.n_buffer, self.len_act),dtype=numpy.float32)
         self.values = numpy.zeros((self.n_buffer,),dtype=numpy.float32)
-        self.states = numpy.zeros((self.n_buffer, *self.shape_state),dtype=numpy.float32)
-        self.previous_states = numpy.zeros((self.n_buffer, *self.shape_state),dtype=numpy.float32)
+        self.states = numpy.zeros((self.n_buffer, *self.shape_state),dtype=numpy.uint8)
+        self.previous_states = numpy.zeros((self.n_buffer, *self.shape_state),dtype=numpy.uint8)
         self.dones = numpy.zeros((self.n_buffer,),dtype=numpy.float32)
         self.vars = [i for i in range(self.len_act)]
 
@@ -204,9 +204,13 @@ class sac:
         #self.modelq1a = keras.Model(inputs=inp, outputs=[layv, layc])
 
         self.modelq2 = keras.models.clone_model(self.modelq1)
+        self.modelq3 = keras.models.clone_model(self.modelq1)
 
         self.targetq1 = keras.models.clone_model(self.modelq1)
         self.targetq2 = keras.models.clone_model(self.modelq1)
+        self.targetq3 = keras.models.clone_model(self.modelq1)
+
+        self.modelp1 = keras.models.clone_model(self.modelp)
 
 
 
@@ -219,8 +223,8 @@ class sac:
 
         self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.0003)
         self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.0003)
-        self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.00001)
-        self.alphav = tf.Variable(0.05)
+        self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.00000005)
+        self.alphav = tf.Variable(0.005)
         self.max_alpha = 0.01
 
 
@@ -249,12 +253,15 @@ class sac:
 
     @tf.function
     def get_net_res(self,l_state):
-        out = self.modelp(l_state, training = False)
+        out = self.modelp(tf.cast(l_state,tf.float32)/255.0, training = False)
+        out = tf.clip_by_value(out,0.001,0.997)
+
         return out
 
     @tf.function
     def get_value_res(self,l_state):
-        val = self.modelq1(l_state, training = False)[1]
+
+        val = self.modelq1(l_state/255.0, training = False)[1]
         return val
 
     def get_net_act(self,l_state):
@@ -273,68 +280,109 @@ class sac:
     @tf.function
     def train_q(self, inp, inp_next, actn, rew, dones, al):
         with tf.GradientTape(persistent=True) as tape1:
-            y_pi = self.modelp(inp_next, training = True)
-            qv1 =  self.modelq1(inp, training = True)
-            qv2 =  self.modelq2(inp, training = True)
+            inp1 = inp / 255.0
+            inp_next1 = inp_next / 255.0
+            y_pi = self.modelp(inp_next1, training = True)
+
+            y_pi = tf.clip_by_value(y_pi,1e-07,0.99999999)
+            qv1 =  self.modelq1(inp1, training = True)
+            qv2 =  self.modelq2(inp1, training = True)
+            qv3 =  self.modelq3(inp1, training = True)
+
+            tqv1 =  self.targetq1(inp1, training = True)
+            tqv2 =  self.targetq2(inp1, training = True)
+            tqv3 =  self.targetq3(inp1, training = True)
 
             #acts1 = tf.random.categorical(tf.math.log(y_pi+1e-12), 1)
 
-            targ1 = self.targetq1(inp_next, training = True)
-            targ2 = self.targetq2(inp_next, training = True)
+            targ1 = self.targetq1(inp_next1, training = True)
+            targ2 = self.targetq2(inp_next1, training = True)
+            targ3 = self.targetq3(inp_next1, training = True)
 
             #targ_1 = tf.gather_nd(batch_dims=1,params = targ1,indices  = acts1)
             #targ_2 = tf.gather_nd(batch_dims=1,params = targ2,indices  = acts1)
             #api = tf.gather_nd(batch_dims=1,params = y_pi,indices  = acts1)
-            logpi = tf.math.log(y_pi+1e-12)
-            targ = tf.minimum(targ1,targ2)
+            logpi = tf.math.log(y_pi)
+            targ = (targ1+targ2+targ3)*0.3333333333333333333#tf.minimum(targ1,targ2)
             q1 =  tf.gather_nd(batch_dims=1,params = qv1,indices  = actn)
             q2 =  tf.gather_nd(batch_dims=1,params = qv2,indices  = actn)
+            q3 =  tf.gather_nd(batch_dims=1,params = qv3,indices  = actn)
+
+
+            qt1 =  tf.gather_nd(batch_dims=1,params = tqv1,indices  = actn)
+            qt2 =  tf.gather_nd(batch_dims=1,params = tqv2,indices  = actn)
+            qt3 =  tf.gather_nd(batch_dims=1,params = tqv3,indices  = actn)
 
 
             dift = tf.reduce_sum((targ-tf.stop_gradient(self.alphav)*logpi)*y_pi, axis=-1)
 
             qvt =  tf.stop_gradient(rew+self.gamma*dift*(1-dones))
 
-            lossq1 = tf.reduce_mean(tf.math.square(q1 - qvt))
-            lossq2 = tf.reduce_mean(tf.math.square(q2 - qvt))
-            #lossq = lossq + tf.reduce_mean(tf.square(img1-inp_next))
-            trainable_vars1a = self.modelq1.trainable_variables
-            trainable_vars2a = self.modelq2.trainable_variables
+            dif1a = tf.math.square(q1 - qvt)
+            dif1b = tf.math.square(qt1+tf.clip_by_value(q1-qt1,-0.5,0.5)-qvt)
+            dif1 = tf.maximum(dif1a,dif1b)
 
-        grads1a = tape1.gradient(lossq1, trainable_vars1a)
-        grads2a = tape1.gradient(lossq2, trainable_vars2a)
+            dif2a = tf.math.square(q2 - qvt)
+            dif2b = tf.math.square(qt2+tf.clip_by_value(q2-qt2,-0.5,0.5)-qvt)
+            dif2 = tf.maximum(dif2a,dif2b)
+
+            dif3a = tf.math.square(q3 - qvt)
+            dif3b = tf.math.square(qt3+tf.clip_by_value(q3-qt3,-0.5,0.5)-qvt)
+            dif3 = tf.maximum(dif3a,dif3b)
+
+
+
+            lossq1 = tf.reduce_mean(dif1)
+            lossq2 = tf.reduce_mean(dif2)
+            lossq3 = tf.reduce_mean(dif3)
+            lossq = lossq1+lossq2+lossq3
+            #trainable_varsa = self.modelq1.trainable_variables
+            #trainable_varsb = self.modelq2.trainable_variables
+            #trainable_varsc = self.modelq3.trainable_variables
+            trainable_varsa = self.modelq1.trainable_variables+self.modelq2.trainable_variables+self.modelq3.trainable_variables
+
+        gradsa = tape1.gradient(lossq, trainable_varsa)
+        #gradsb = tape1.gradient(lossq2, trainable_varsb)
+        #gradsc = tape1.gradient(lossq3, trainable_varsc)
+        #grads = [(grada+gradb+gradc)*0.33333333333 for  grada,gradb,gradc in zip(gradsa, gradsb, gradsc)]
 
         with tf.GradientTape() as tape2:
-            y_pi1 = self.modelp(inp, training = True)
+            y_pii = self.modelp(inp1, training = True)
+            y_pii = tf.clip_by_value(y_pii,1e-07,0.99999999)
 
             #q1 =  tf.gather_nd(batch_dims=1,params = qv1,indices  = acts)
             #q2 =  tf.gather_nd(batch_dims=1,params = qv2,indices  = acts)
-            logpi = tf.math.log(y_pi1+1e-12)
-            minq = tf.stop_gradient(tf.minimum(qv1,qv2))
 
-            diflm = tf.reduce_sum(y_pi1*(tf.stop_gradient(self.alphav)*logpi - minq),axis=-1)
-            lossp = tf.reduce_mean(diflm) #+ tf.reduce_mean(tf.square(img-inp_next))
+
+            logpi = tf.math.log(y_pii)
+            minq = tf.stop_gradient((qv1+qv2+qv3)*0.33333333333333333333333)
+
+            diflm = tf.reduce_sum(y_pii*(tf.stop_gradient(self.alphav)*logpi - minq),axis=-1)
+            dm = tf.reduce_mean(diflm)
+            #lossmin = tf.reduce_mean(tf.math.exp(-y_pii/0.0001))
+
+            lossp = dm#+lossmin*0.1*tf.math.abs(dm) #+ tf.reduce_mean(tf.square(img-inp_next))
 
             trainable_vars2 = self.modelp.trainable_variables
         grads2 = tape2.gradient(lossp, trainable_vars2)
-        self.optimizer1.apply_gradients(zip(grads1a, trainable_vars1a))
-        self.optimizer1.apply_gradients(zip(grads2a, trainable_vars2a))
+
+        self.optimizer1.apply_gradients(zip(gradsa, trainable_varsa))
+        #self.optimizer1.apply_gradients(zip(grads, trainable_varsb))
+        #self.optimizer1.apply_gradients(zip(grads, trainable_varsc))
         self.optimizer2.apply_gradients(zip(grads2, trainable_vars2))
 
-        with tf.GradientTape() as tape3:
-            H = tf.reduce_sum(y_pi1*logpi,axis=-1)
-            valH = H-tf.math.log(0.25)*0.99
-
-            lossa = - self.alphav*valH + tf.nn.relu(1e-3-self.alphav)
-
-        grads3 = tape3.gradient(lossa, [self.alphav])
-        self.optimizer3.apply_gradients(zip(grads3, [self.alphav]))
+        #with tf.GradientTape() as tape3:
+        #    H = tf.reduce_sum(y_pi1*logpi,axis=-1)
+        #    valH = H-tf.math.log(0.25)*0.99
+        #    lossa = - self.alphav*valH + tf.nn.relu(1e-3-self.alphav)*100.0
+        #grads3 = tape3.gradient(lossa, [self.alphav])
+        #self.optimizer3.apply_gradients(zip(grads3, [self.alphav]))
 
 
 
 
 
-        return lossq1+lossq2, lossp, tf.reduce_mean(q1), tf.reduce_mean(- self.alphav*logpi)
+        return lossq, lossp, tf.reduce_mean(tf.math.abs(qv1-qv2)), tf.reduce_mean(- self.alphav*logpi)
 
 
 
@@ -378,6 +426,11 @@ class sac:
         for (a, b) in zip(target_weights, weights):
             a.assign(b * tau + a * (1 - tau))
 
+        target_weights = self.targetq3.trainable_variables
+        weights = self.modelq3.trainable_variables
+        for (a, b) in zip(target_weights, weights):
+            a.assign(b * tau + a * (1 - tau))
+
 
         return
 
@@ -393,14 +446,15 @@ class sac:
         indices = numpy.random.choice(max_count, self.T)
 
         inp_next = tf.cast(self.states[indices] ,tf.float32)
-        inp = tf.cast(self.previous_states[indices] ,tf.float32)
+        inp = tf.cast(self.previous_states[indices],tf.float32)
+
         acts = tf.cast(self.acts[indices] ,tf.int32)
         rews = tf.cast(self.rews[indices] ,tf.float32)
         dones = tf.cast(self.dones[indices] ,tf.float32)
         al = (tf.cast(numpy.random.random(), tf.float32)-0.5)*0.00001+0.5
         lossq, lossp, qv, qvt = self.train_q(inp,inp_next,acts, rews, dones, al)
-        if(numpy.random.random()>0.999):
-            self.alphav.assign(self.max_alpha)
+        #if(numpy.random.random()>0.999):
+        #    self.alphav.assign(self.max_alpha)
 
 
 
@@ -441,6 +495,7 @@ class sac:
 
 
 
+
         self.add(reward,done,prev_st,state,act, pol)
 
         self.cur_reward = self.cur_reward+reward
@@ -465,7 +520,7 @@ class sac:
         if self.flag:
             self.show()
 
-        if self.index>self.T*4 and self.index%32==0:
+        if self.index>self.T*4 and self.index%64==0:
             lossq, lossp, qv, qvt = self.learn_all()
 
 
