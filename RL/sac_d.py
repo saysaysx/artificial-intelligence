@@ -38,25 +38,27 @@ sess.as_default()
 
 class environment():
     def __init__(self):
-        self.env = gym.make("Breakout-v4", render_mode="rgb_array")
+        self.env = gym.make("MsPacman-v4", render_mode="rgb_array")
 
         #self.env = wr.AtariWrapper(self.env,frame_skip=1, terminal_on_life_loss=False)
         #self.env = wr.NoopResetEnv(self.env)
         #self.env = wr.FireResetEnv(self.env)
-        self.env = gym.wrappers.ResizeObservation(self.env,shape=(84,84))
-        self.env = gym.wrappers.GrayScaleObservation(self.env,keep_dim=True)
+        self.env = gym.wrappers.ResizeObservation(self.env,shape=(105,80))
+        #self.env = gym.wrappers.GrayScaleObservation(self.env,keep_dim=True)
         self.env = gym.wrappers.FrameStack(self.env,num_stack=4)
         print(self.env.action_space.n)
         self.n_action = self.env.action_space.n
-
+        print("Максимальная награда за действие:", self.env.reward_range)
 
         self.step = 0
 
         self.reward = 0.0
         self.index = 0
+        print(self.env.observation_space)
+        shx = (self.env.observation_space.high).transpose([1,2,0,3]).shape
+        self.state_max = numpy.reshape(self.env.observation_space.high.transpose([1,2,0,3]),[shx[0],shx[1],shx[2]*shx[3]])
+        self.state_min = numpy.reshape(self.env.observation_space.low.transpose([1,2,0,3]),[shx[0],shx[1],shx[2]*shx[3]])
 
-        self.state_max = numpy.squeeze(self.env.observation_space.high).transpose([1,2,0])
-        self.state_min = numpy.squeeze(self.env.observation_space.low).transpose([1,2,0])
 
         self.igame  = 0
         self.xnew = []
@@ -80,8 +82,10 @@ class environment():
 
 
         next_observation, reward, done, _,_ = self.env.step(act)
-
-        self.field = numpy.squeeze(next_observation).transpose([1,2,0])
+        reward = reward / 10.0
+        next_observation = numpy.array(next_observation)
+        shx = (next_observation).transpose([1,2,0,3]).shape
+        self.field = numpy.reshape(next_observation.transpose([1,2,0,3]),[shx[0],shx[1],shx[2]*shx[3]])
 
 
         self.reward = self.reward+reward
@@ -94,9 +98,11 @@ class environment():
 
     def env_reset(self):
         self.index = 0
-        im = self.env.reset()[0]
+        im = numpy.array(self.env.reset()[0])
+        shx = im.transpose([1,2,0,3]).shape
+        next_observation = numpy.reshape(im.transpose([1,2,0,3]),[shx[0],shx[1],shx[2]*shx[3]])
 
-        next_observation = numpy.squeeze(im).transpose([1,2,0])
+
         self.field = next_observation
 
 
@@ -135,7 +141,7 @@ class sac:
         self.shape_state = env.get_shape_state()
         self.len_act = env.get_len_acts()
         self.gamma = 0.99
-        self.alpha = 0.05
+        self.alpha = 0.5
 
 
         self.max_t = 10
@@ -221,10 +227,10 @@ class sac:
         tf.keras.utils.plot_model(self.modelp, to_file='./out/netp.png', show_shapes=True)
         #tf.keras.utils.plot_model(self.modelpa, to_file='./out/netpa.png', show_shapes=True)
 
-        self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.0003)
-        self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.0003)
-        self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.00000005)
-        self.alphav = tf.Variable(0.005)
+        self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.0002)
+        self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.0002)
+        self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.0006)
+        self.alphav = tf.Variable(0.04)
         self.max_alpha = 0.01
 
 
@@ -254,7 +260,7 @@ class sac:
     @tf.function
     def get_net_res(self,l_state):
         out = self.modelp(tf.cast(l_state,tf.float32)/255.0, training = False)
-        out = tf.clip_by_value(out,0.001,0.997)
+        out = tf.clip_by_value(out,0.001,0.992)
 
         return out
 
@@ -319,22 +325,22 @@ class sac:
             qvt =  tf.stop_gradient(rew+self.gamma*dift*(1-dones))
 
             dif1a = tf.math.square(q1 - qvt)
-            dif1b = tf.math.square(qt1+tf.clip_by_value(q1-qt1,-0.5,0.5)-qvt)
-            dif1 = tf.maximum(dif1a,dif1b)
+            #dif1b = tf.math.square(qt1+tf.clip_by_value(q1-qt1,-0.5,0.5)-qvt)
+            #dif1 = tf.maximum(dif1a,dif1b)
 
             dif2a = tf.math.square(q2 - qvt)
-            dif2b = tf.math.square(qt2+tf.clip_by_value(q2-qt2,-0.5,0.5)-qvt)
-            dif2 = tf.maximum(dif2a,dif2b)
+            #dif2b = tf.math.square(qt2+tf.clip_by_value(q2-qt2,-0.5,0.5)-qvt)
+            #dif2 = tf.maximum(dif2a,dif2b)
 
             dif3a = tf.math.square(q3 - qvt)
-            dif3b = tf.math.square(qt3+tf.clip_by_value(q3-qt3,-0.5,0.5)-qvt)
-            dif3 = tf.maximum(dif3a,dif3b)
+            #dif3b = tf.math.square(qt3+tf.clip_by_value(q3-qt3,-0.5,0.5)-qvt)
+            #dif3 = tf.maximum(dif3a,dif3b)
 
 
 
-            lossq1 = tf.reduce_mean(dif1)
-            lossq2 = tf.reduce_mean(dif2)
-            lossq3 = tf.reduce_mean(dif3)
+            lossq1 = tf.reduce_mean(dif1a)
+            lossq2 = tf.reduce_mean(dif2a)
+            lossq3 = tf.reduce_mean(dif3a)
             lossq = lossq1+lossq2+lossq3
             #trainable_varsa = self.modelq1.trainable_variables
             #trainable_varsb = self.modelq2.trainable_variables
@@ -372,8 +378,8 @@ class sac:
         self.optimizer2.apply_gradients(zip(grads2, trainable_vars2))
 
         #with tf.GradientTape() as tape3:
-        #    H = tf.reduce_sum(y_pi1*logpi,axis=-1)
-        #    valH = H-tf.math.log(0.25)*0.99
+        #    H = tf.reduce_sum(y_pii*logpi,axis=-1)
+        #    valH = H-tf.math.log(0.111111111)*0.995
         #    lossa = - self.alphav*valH + tf.nn.relu(1e-3-self.alphav)*100.0
         #grads3 = tape3.gradient(lossa, [self.alphav])
         #self.optimizer3.apply_gradients(zip(grads3, [self.alphav]))
@@ -414,7 +420,7 @@ class sac:
 
     @tf.function
     def target_train(self):
-        tau = 0.01
+        tau = 0.005
 
         target_weights = self.targetq1.trainable_variables
         weights = self.modelq1.trainable_variables
