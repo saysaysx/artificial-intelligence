@@ -106,9 +106,6 @@ class environment():
 
         self.reward = self.reward+reward
         self.index = self.index + 1
-
-
-
         return done, self.state(), reward
 
     def env_reset(self):

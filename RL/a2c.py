@@ -313,10 +313,6 @@ class a2c:
 
 
             rel = tf.math.log(y_pi2+1e-12)*adv
-
-
-
-
             loss_value = - tf.reduce_sum(rel)
             entr = tf.reduce_sum(y_pi*tf.math.log(y_pi+1e-8),axis=1)
 

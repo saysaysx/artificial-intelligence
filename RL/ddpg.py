@@ -253,9 +253,6 @@ class ddpg:
             trainable_vars1 = self.modelq.trainable_variables
         grads1 = tape1.gradient(lossq, trainable_vars1)
         self.optimizer1.apply_gradients(zip(grads1, trainable_vars1))
-
-
-
         return lossq
 
     @tf.function
