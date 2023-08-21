@@ -208,8 +208,6 @@ class ppo:
         self.modelA1 = keras.Model(inputs=inp, outputs=[lay1])
 
         lay = Conv2D(8,(8,8), strides = (4,4),activation= 'relu',padding='same') (inp)
-
-
         lay = Conv2D(16,(4,4), strides = (2,2), activation= 'relu',padding='same') (lay)
         lay2v = Conv2D(32,(3,3), strides = (2,2), activation= 'relu',padding='same') (lay)
         lay2 = Flatten() (lay2v)

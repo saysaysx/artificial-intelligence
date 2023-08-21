@@ -378,9 +378,6 @@ class sac:
         if done:
             self.env.env_reset()
 
-
-
-
         if self.flag:
             self.show()
 
