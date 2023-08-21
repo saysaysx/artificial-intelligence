@@ -1,8 +1,7 @@
 # MIT License
 # Copyright (c) 2023 saysaysx
 
-import numpy as np
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 
 
 import numpy
@@ -10,10 +9,8 @@ import time
 
 from random import choices
 import tensorflow as tf
-import  gym
+import gymnasium as gym
 import cv2
-
-
 
 
 print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
@@ -41,17 +38,19 @@ sess.as_default()
 
 class environment():
     def __init__(self):
-        #name = "MountainCarContinuous-v0"
+        name = "MountainCarContinuous-v0"
         name = "Pendulum-v1"
+        #name = 'InvertedDoublePendulum-v4'
+        #name = "Pusher-v4"
 
         self.env = gym.make(name)
 
         print(self.env.action_space)
 
         self.n_action = self.env.action_space.shape[0]
-
-        self.maxa = self.env.action_space.high[0]
-        self.mina = self.env.action_space.low[0]
+        print(self.n_action)
+        self.maxa = self.env.action_space.high
+        self.mina = self.env.action_space.low
 
         print(self.maxa)
         print(self.mina)
@@ -90,7 +89,7 @@ class environment():
         next_observation, reward, done, info = self.env.step(act)
 
         self.field = numpy.array(next_observation)
-        reward = reward
+        reward = reward/100.0
 
         self.reward = self.reward+reward
         self.index = self.index + 1
@@ -129,7 +128,7 @@ class environment():
 
 
 
-class ddpg:
+class sac:
     def __init__(self,env):
         self.env = env
         self.index = 0
@@ -145,15 +144,15 @@ class ddpg:
         self.max_t = 10
         self.start_time = time.time()
 
-        self.T = 512
-        self.n_buffer = 100000
+        self.T = 1024
+        self.n_buffer = 300000
         self.buf_index  = 0
         self.flag_buf = False
 
 
 
         self.rews = numpy.zeros((self.n_buffer,),dtype=numpy.float32)
-        self.acts = numpy.zeros((self.n_buffer, ),dtype=numpy.float32)
+        self.acts = numpy.zeros((self.n_buffer, self.len_act),dtype=numpy.float32)
         self.policies = numpy.zeros((self.n_buffer, self.len_act),dtype=numpy.float32)
         self.values = numpy.zeros((self.n_buffer,),dtype=numpy.float32)
         self.states = numpy.zeros((self.n_buffer, *self.shape_state),dtype=numpy.float32)
@@ -164,41 +163,55 @@ class ddpg:
 
 
         inp = Input(shape = self.shape_state)
-        lay =  Dense(16, activation = 'relu') (inp)
-        lay =  Dense(32, activation = 'relu') (lay)
+        lay =  Dense(16, activation = tf.nn.leaky_relu) (inp)
+        lay = keras.layers.BatchNormalization() (lay)
+        lay =  Dense(32, activation = tf.nn.leaky_relu) (lay)
+        lay = keras.layers.BatchNormalization() (lay)
 
 
         inp_act = Input(shape = (self.len_act,))
-        laya = Dense(32, activation = 'relu') (inp_act)
-        
+        laya = Dense(32, activation = tf.nn.leaky_relu) (inp_act)
+        laya = keras.layers.BatchNormalization() (laya)
+
 
         laya = keras.layers.Concatenate() ([lay,laya])
-        laya = Dense(256, activation = 'relu') (laya)
-        lay = Dense(256, activation = 'relu') (laya)
-        layq = Dense(1, activation="linear") (lay)
 
-        self.modelq = keras.Model(inputs=[inp, inp_act], outputs=[layq])
+        laya = Dense(256, activation = tf.nn.leaky_relu) (laya)
+        laya = keras.layers.BatchNormalization() (laya)
+        laya = Dense(256, activation = tf.nn.leaky_relu) (laya)
+        laya = keras.layers.BatchNormalization() (laya)
+        layq = Dense(1, activation="linear") (laya)
+
+        self.modelq1 = keras.Model(inputs=[inp, inp_act], outputs=[layq])
 
         inp = Input(shape = self.shape_state)
-        lay =  Dense(256, activation = 'relu') (inp)
-        layp = Dense(256, activation = 'relu') (lay)
-        layp = Dense(1, activation = 'linear') (layp)
+
+        lay =  Dense(256, activation = tf.nn.leaky_relu) (inp)
+        lay = keras.layers.BatchNormalization() (lay)
+        lay = Dense(256, activation = tf.nn.leaky_relu) (lay)
+        lay = keras.layers.BatchNormalization() (lay)
+        layp = Dense(self.len_act, activation = 'tanh') (lay)
+
         def loutf(x):
-            x = tf.clip_by_value(x, self.env.mina,self.env.maxa)
-            #x = (x+1.0)*0.5*(self.env.maxa-self.env.mina)+self.env.mina
+
+            #x = tf.clip_by_value(x, self.env.mina,self.env.maxa)
+            x = (x+1.0)*0.5*(self.env.maxa-self.env.mina)+self.env.mina
             return x
 
         layo = keras.layers.Lambda(loutf) (layp)
 
         self.modelp = keras.Model(inputs=[inp], outputs=[layo])
 
-        self.targetq = keras.models.clone_model(self.modelq)
+        self.modelq2 = keras.models.clone_model(self.modelq1)
+        self.targetq1 = keras.models.clone_model(self.modelq1)
+
+        self.targetq2 = keras.models.clone_model(self.modelq1)
         self.targetp = keras.models.clone_model(self.modelp)
 
-        tf.keras.utils.plot_model(self.modelq, to_file='./out/netq.png', show_shapes=True)
+        #tf.keras.utils.plot_model(self.modelq1, to_file='./out/netq.png', show_shapes=True)
 
-        self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.0004)
-        self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.0004)
+        self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.001)
+        self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.0005)
 
         self.cur_reward = 0.0
         self.cur_reward100 = 0.0
@@ -228,14 +241,16 @@ class ddpg:
 
     @tf.function
     def get_value_res(self,l_state):
-        val = self.modelq(l_state, training = False)[1]
+        val = self.modelq1(l_state, training = False)[1]
         return val
 
     def get_net_act(self,l_state):
 
+
         out = self.get_net_res(numpy.array([l_state]))
         v = numpy.random.randn(1)
-        x = out[0]+v*0.1#ou_noise()
+
+        x = out[0]+v*0.1
 
         x = numpy.clip(x, self.env.mina ,self.env.maxa)
         return x
@@ -243,31 +258,33 @@ class ddpg:
 
 
     @tf.function
-    def train(self, inp, inp_next, actn, rew, dones):
+    def train1(self, inp, inp_next, actn, rew, dones):
         with tf.GradientTape() as tape1:
             acts = self.targetp(inp_next, training = True)
+            noise = tf.random.normal(shape = acts.shape)*0.2
+            noise = tf.clip_by_value(noise,-0.5,0.5)
 
-            qvt = rew+self.gamma*self.targetq([inp_next,acts], training = True)*(1-dones)
-            qv = self.modelq([inp,actn], training = True)
-            lossq = tf.reduce_mean(tf.math.square(qv - qvt))
-            trainable_vars1 = self.modelq.trainable_variables
+            qvt1 = rew+self.gamma*self.targetq1([inp_next,acts+noise], training = True)*(1-dones)
+            qvt2 = rew+self.gamma*self.targetq2([inp_next,acts+ noise], training = True)*(1-dones)
+            qvt = tf.minimum(qvt1,qvt2)
+            qv1 = self.modelq1([inp,actn], training = True)
+            qv2 = self.modelq2([inp,actn], training = True)
+
+            lossq = tf.reduce_mean(tf.math.square(qv1 - qvt))+tf.reduce_mean(tf.math.square(qv2 - qvt))
+            trainable_vars1 = self.modelq1.trainable_variables+self.modelq2.trainable_variables
         grads1 = tape1.gradient(lossq, trainable_vars1)
         self.optimizer1.apply_gradients(zip(grads1, trainable_vars1))
+        return tf.reduce_mean(qvt)
 
 
-
-        return lossq
 
     @tf.function
-    def train_actor(self, inp):
+    def train_actor1(self, inp):
         with tf.GradientTape() as tape2:
             acts = self.modelp(inp, training = True)
-
-
-            qv = self.modelq([inp,acts], training = True)
-            lossp = - tf.reduce_mean(qv)
+            qv1 = self.modelq1([inp,acts], training = True)
+            lossp = -tf.reduce_mean(qv1)
             trainable_vars2 = self.modelp.trainable_variables
-
 
         grads2= tape2.gradient(lossp, trainable_vars2)
         self.optimizer2.apply_gradients(zip(grads2, trainable_vars2))
@@ -275,18 +292,26 @@ class ddpg:
 
 
 
+
+
     @tf.function
     def target_train(self):
-        tau = 0.002
+        tau = 0.001
         target_weights = self.targetp.trainable_variables
         weights = self.modelp.trainable_variables
         for (a, b) in zip(target_weights, weights):
             a.assign(b * tau + a * (1 - tau))
 
-        target_weights = self.targetq.trainable_variables
-        weights = self.modelq.trainable_variables
+        target_weights = self.targetq1.trainable_variables
+        weights = self.modelq1.trainable_variables
         for (a, b) in zip(target_weights, weights):
             a.assign(b * tau + a * (1 - tau))
+
+        target_weights = self.targetq2.trainable_variables
+        weights = self.modelq2.trainable_variables
+        for (a, b) in zip(target_weights, weights):
+            a.assign(b * tau + a * (1 - tau))
+
 
         return
 
@@ -300,21 +325,29 @@ class ddpg:
             max_count = self.buf_index
 
         indices = numpy.random.choice(max_count, self.T)
+        inp_next = tf.cast(self.states[indices] ,tf.float32)
+        inp = tf.cast(self.previous_states[indices] ,tf.float32)
+        acts = tf.cast(self.acts[indices] ,tf.float32)
+        rews = tf.cast(self.rews[indices] ,tf.float32)
+        dones = tf.cast(self.dones[indices] ,tf.float32)
+        lossq1 = self.train1(inp,inp_next,acts, rews, dones)
 
-        inp_next = tf.stop_gradient(tf.cast(self.states[indices] ,tf.float32))
-        inp = tf.stop_gradient(tf.cast(self.previous_states[indices] ,tf.float32))
-        acts = tf.stop_gradient(tf.cast(self.acts[indices] ,tf.float32))
-        rews = tf.stop_gradient(tf.cast(self.rews[indices] ,tf.float32))
-        dones = tf.stop_gradient(tf.cast(self.dones[indices] ,tf.float32))
-        lossq = self.train(inp,inp_next,acts, rews, dones)
 
-        indices = numpy.random.choice(max_count, self.T)
-        inp = tf.stop_gradient(tf.cast(self.previous_states[indices] ,tf.float32))
-        lossp = self.train_actor(inp)
+
+        lossq = lossq1*0.5
+
+
+
+        lossp = 0
+        if self.buf_index%2==0:
+            lossp = self.train_actor1(inp)
+
+
+
         self.target_train()
         return lossq, lossp
 
-    def add(self, reward,done,state,prev_state,act):
+    def add(self, reward,done,prev_state,state,act):
         i = self.buf_index
         self.rews[i] = reward
         self.dones[i] = done
@@ -338,7 +371,7 @@ class ddpg:
 
         state, reward, done  = self.env.get_state(act)
 
-        self.add(reward,done,state,prev_st,act)
+        self.add(reward,done,prev_st,state,act)
 
         self.cur_reward = self.cur_reward*self.gamma*(1-done)+reward
 
@@ -355,8 +388,8 @@ class ddpg:
             lossq, lossp = self.learn_all()
 
         self.index = self.index+1
-        if(self.index%1000==0):
-            print(f"index {self.index} lossq {lossq}  lossp {lossp}  acts {self.acts[self.buf_index-5:self.buf_index]} rew {self.cur_reward}")
+        if(self.index%1000==0 and self.buf_index>self.T):
+            print(f"index {self.index} lossq {lossq}  lossp {lossp}  acts {self.acts[self.buf_index-2:self.buf_index,0]} rew {self.cur_reward}")
             self.cur_reward = 0
             self.show()
 
@@ -373,6 +406,6 @@ class ddpg:
 
 
 env = environment()
-ddpg1 = ddpg(env)
+sac1 = sac(env)
 for i in range(100000000):
-    ddpg1.step()
+    sac1.step()

@@ -2,12 +2,6 @@
 # Copyright (c) 2023 saysaysx
 import random
 
-#I can’t understand why this code is so slow compared to those given in the articles,
-# training requires more than 100 million received frames, while memory consumption
-# increases and intermediate saving and running the code again is required.
-# Memory consumption grows due to changes in the size of the shape of the supplied arrays,
-# but here an attempt was made to minimize such situations as much as possible,
-# but memory growth still occurs, and, nevertheless, a significant consumption of game situations.
 
 import numpy
 import time
@@ -32,7 +26,7 @@ print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
 gpus = tf.config.list_physical_devices('GPU')
 print("GPUs Available: ", gpus)
 
-tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
+#tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
 
 import tensorflow.keras as keras
 from tensorflow.keras.layers import Dense, Input, concatenate, BatchNormalization, Dropout, Conv2D, Reshape, Flatten
@@ -158,7 +152,7 @@ class multi_environment:
         return self.envs[i].get_image()
 
 
-class ppo:
+class a2c:
     def __init__(self,envs):
         self.envs = envs
         self.index = 0
@@ -180,13 +174,13 @@ class ppo:
 
         self.rews = numpy.zeros((self.N, self.T),dtype=numpy.float32)
         self.acts = numpy.zeros((self.N, self.T),dtype=numpy.int32)
-        self.policies = numpy.zeros((self.N,self.T, self.len_act),dtype=numpy.float32)
+
         self.values = numpy.zeros((self.N,self.T),dtype=numpy.float32)
         self.states = numpy.zeros((self.N, self.T, *self.shape_state),dtype=numpy.float32)
         self.previous_states = numpy.zeros((self.N, self.T, *self.shape_state),dtype=numpy.float32)
         self.dones = numpy.zeros((self.N,self.T),dtype=numpy.float32)
         self.cur_rewards = numpy.zeros((self.N),dtype=numpy.int32)
-        self.NSTEP = 128
+        self.NSTEP = 32
         self.NSTEPR = 256
         self.all_rewards = numpy.zeros((self.N, self.NSTEP),dtype=numpy.int32)
         self.all_dif_rewards = numpy.zeros((self.NSTEPR),dtype=numpy.int32)
@@ -306,7 +300,7 @@ class ppo:
 
 
     @tf.function
-    def train_actor(self, inp, adv, acts, pol, vst, value_old):
+    def train_actor(self, inp, adv, acts, vst, value_old):
         with tf.GradientTape() as tape:
             y_pi, v = self.model(inp, training = True)
             y_pin, _ = self.modelm(inp, training = False)
@@ -316,17 +310,17 @@ class ppo:
             adv2 = tf.sqrt(tf.reduce_mean((adv-advm)**2))
             advs = tf.divide(adv-advm, adv2+1e-8)
             y_pi2 = tf.gather_nd(batch_dims=1,params = y_pi,indices  = actn)
-            y_old = tf.gather_nd(batch_dims=1,params = pol,indices  = actn)
 
-            rel = tf.math.exp(tf.math.log(y_pi2+1e-12)-tf.math.log(y_old+1e-12))
 
-            relclip = tf.clip_by_value(rel,0.9,1.1)
+            rel = tf.math.log(y_pi2+1e-12)*adv
 
-            relmin = tf.minimum(rel*advs,relclip*advs)
-            loss_value = -tf.reduce_sum(relmin)
+
+
+
+            loss_value = - tf.reduce_sum(rel)
             entr = tf.reduce_sum(y_pi*tf.math.log(y_pi+1e-8),axis=1)
-            kb = tf.math.reduce_max(tf.reduce_sum((y_pi-pol)*tf.math.log((y_pi)/(pol)),axis=1))
-            #kb = tf.abs(tf.reduce_mean(tf.math.log(pol/y_pi)))
+
+
             ls = tf.reduce_mean(tf.reduce_sum(y_pi*(tf.math.log(y_pi+1e-12)-tf.math.log(y_pin+1e-12)), axis=1))
             val = value_old+ tf.clip_by_value(v - value_old,-22.5,22.5)
 
@@ -335,14 +329,14 @@ class ppo:
             loss_vst = tf.reduce_sum(tf.maximum(loss_vst1, loss_vst2))
             loss_entr = tf.reduce_sum(entr)
 
-            loss_value = loss_value + 0.015*self.c_entr*loss_entr + 0.5*loss_vst + 0.01*ls
+            loss_value = loss_value + 0.01*self.c_entr*loss_entr + 0.05*loss_vst + 0.0001*ls
             trainable_vars = self.model.trainable_variables
         grads = tape.gradient(loss_value, trainable_vars)
         #grads, gnorm = tf.clip_by_global_norm(grads, 5.0)
 
         self.optimizer.apply_gradients(zip([self.learn_rate*grad for grad in grads], trainable_vars))
 
-        return loss_value, loss_entr, loss_vst, kb
+        return loss_value, loss_entr, loss_vst
 
     def max_num(self,rews):
         r = rews.copy()
@@ -370,17 +364,17 @@ class ppo:
 
         adv = adv1.reshape(N*T)
         acts = self.acts.reshape(N*T)
-        pol = self.policies.reshape(N*T, self.len_act)
+
         vst = vst.reshape(N*T)
         val_old = self.values.reshape(N*T)
 
-        EP = 16
+        EP = 1
         S = N*T//EP
 
 
         nc =  int(len(self.max_rewards)*numpy.random.random())
 
-        for i in range(16):
+        for i in range(1):
             #int(numpy.random.random()*self.n_models)
 
             self.modelm = self.models[nc]
@@ -390,16 +384,12 @@ class ppo:
             st_c = tf.stop_gradient(tf.cast(pstates[index] ,tf.float32))
             adv_c = tf.stop_gradient(tf.cast(adv[index] ,tf.float32))
             acts_c = tf.stop_gradient(tf.cast(acts[index] ,tf.int32))
-            pol_c = tf.stop_gradient(tf.cast(pol[index] ,tf.float32))
             vst_c = tf.stop_gradient(tf.cast(vst[index] ,tf.float32))
             val_old_c = tf.stop_gradient(tf.cast(val_old[index] ,tf.float32))
 
-            #xw = self.model.get_weights()
-            _,_,_, ret = self.train_actor(st_c, adv_c, acts_c, pol_c, vst_c, val_old_c)
 
-            #xw = self.model.get_weights()
-            #if ret>0.001:
-            #    self.model.set_weights(xw)
+            _,_,_ = self.train_actor(st_c, adv_c, acts_c, vst_c, val_old_c)
+
 
 
 
@@ -420,7 +410,7 @@ class ppo:
 
                 self.rews[i,j] = reward
                 self.dones[i,j] = done
-                self.policies[i,j] = policy[i]
+
                 self.values[i,j] = value[i]
                 self.states[i,j] = state
                 self.acts[i,j] = act[i]
@@ -509,13 +499,13 @@ class ppo:
 
 
             print(f"reward step {rew}  max_rew {self.max_rewards} cur_dif_step {self.cur_dif_step}  all_rewm {self.all_dif_rewards.mean()}")
-            print(f"policy  {self.policies[0,-1]} value {self.values[0,-1]} time {self.models_time}")
+            print(f"value {self.values[0,-1]} time {self.models_time}")
             #res1 = self.get_value_res(self.states[0,0:10]).numpy().flatten()
             #res2 = self.get_value_res(self.states[0,-10:]).numpy().flatten()
             #print(f"valuef {res1}")
             #print(f"valuef {res2}")
             if(self.index%500==0 and self.index>500):
-                self.model.save_weights("./out/name2.h5")
+                self.model.save_weights("./out/name3.h5")
 
         self.index = self.index +  1
 
@@ -531,6 +521,6 @@ class ppo:
 
 N = 16
 envs = multi_environment(N)
-ppo1 = ppo(envs)
+ppo1 = a2c(envs)
 for i in range(100000000):
     ppo1.step()
