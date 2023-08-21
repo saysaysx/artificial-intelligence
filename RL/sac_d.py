@@ -243,9 +243,6 @@ class sac:
         self.flag = True
 
 
-        #self.model.load_weights("./out/name2.h5")
-
-
         self.nwin = "Main"
         cv2.namedWindow(self.nwin)
         cv2.setMouseCallback(self.nwin,self.capture_event)
