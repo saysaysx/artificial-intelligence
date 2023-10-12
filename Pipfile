@@ -18,6 +18,7 @@ scipy = "*"
 gymnasium = {extras = ["classic_control", "atari"]}
 graphviz = "*"
 pydotplus = "*"
+openpyxl = "*"
 
 [dev-packages]
 
