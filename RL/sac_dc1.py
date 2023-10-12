@@ -228,10 +228,6 @@ class sac:
         layv = Dense(self.len_act, activation = 'linear') (lay2)
         self.targetq2 = keras.Model(inputs=inp2, outputs=[layv])
 
-
-
-
-
         tf.keras.utils.plot_model(self.modelq1, to_file='./out/netq.png', show_shapes=True)
         tf.keras.utils.plot_model(self.targetq1, to_file='./out/nettq1.png', show_shapes=True)
         tf.keras.utils.plot_model(self.modelp, to_file='./out/netp.png', show_shapes=True)
@@ -338,20 +334,15 @@ class sac:
             #dif2b = tf.math.square(qt2+tf.clip_by_value(q2-qt2,-0.5,0.5)-qvt)
             #dif2 = tf.maximum(dif2a,dif2b)
 
-
-
             lossq1 = tf.reduce_mean(dif1a)
             lossq2 = tf.reduce_mean(dif2a)
             lossq = lossq1+lossq2
-
             trainable_varsa = self.modelq1.trainable_variables+self.modelq2.trainable_variables
-
         gradsa = tape1.gradient(lossq, trainable_varsa)
 
         with tf.GradientTape() as tape2:
             y_pii = self.modelp([inp1,inp1], training = True)
             y_pii = tf.clip_by_value(y_pii,1e-12,0.9999999999999)
-
 
             logpi = tf.math.log(y_pii)
             minq = tf.stop_gradient((qv1+qv2)*0.5)
