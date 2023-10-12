@@ -184,9 +184,8 @@ class sac:
         layb = Flatten() (layb)
         lay1 = Dense(256, activation="relu") (layb)
         layv = Dense(self.len_act, activation = 'linear') (lay1)
-        self.nnets = 4
-        self.chnum = [0, 1]
 
+        self.nnets = 2
         self.modelq = [[]]*self.nnets
         self.modelq[0] = keras.Model(inputs=inp1, outputs=[layv])
         for i in range(1,self.nnets):
@@ -220,11 +219,7 @@ class sac:
         self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.00025)
         self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.0004)
 
-        #5100 score on 13 mln steps, to 15 mln around 5000, alfa = 0.004, maxentropy_perc = 0.05
-        #value on loss dop entropy on maxv 0.02
-
         self.alphav = tf.Variable(0.003)
-
         p = 1/self.len_act
         self.entrmax = tf.cast(- tf.math.log(p), tf.float32)
         print(self.entrmax)

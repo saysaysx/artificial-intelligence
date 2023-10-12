@@ -175,38 +175,60 @@ class sac:
         print("Shape")
         print(self.shape_state)
 
-        inp = Input(shape = self.shape_state)
-        lay = Conv2D(16,(8,8), strides = (4,4),activation= 'relu',padding='same') (inp)
+        inp1 = Input(shape = self.shape_state)
+        lay = Conv2D(16,(8,8), strides = (4,4),activation= 'relu',padding='same') (inp1)
         lay = Conv2D(32,(4,4), strides = (2,2), activation= 'relu',padding='same') (lay)
         layb = Conv2D(64,(3,3), strides = (1,1), activation= 'relu',padding='same') (lay)
-        lay1 = Flatten() (layb)
-        lay1 = Dense(256, activation="relu") (lay1)
+        layb = Flatten() (layb)
+        lay1 = Dense(256, activation="relu") (layb)
         layv = Dense(self.len_act, activation = 'linear') (lay1)
-        self.modelq1 = keras.Model(inputs=inp, outputs=[layv])
-        self.modelq2 = keras.models.clone_model(self.modelq1)
+        self.modelq1 = keras.Model(inputs=inp1, outputs=[layv])
 
 
-        inp = Input(shape = self.shape_state)
-        lay = Conv2D(16,(8,8), strides = (4,4),activation= 'relu',padding='same') (inp)
+        inp2 = Input(shape = self.shape_state)
+        lay = Conv2D(16,(8,8), strides = (4,4),activation= 'relu',padding='same') (inp2)
         lay = Conv2D(32,(4,4), strides = (2,2), activation= 'relu',padding='same') (lay)
         layb = Conv2D(64,(3,3), strides = (1,1), activation= 'relu',padding='same') (lay)
-        lay1 = Flatten() (layb)
-        lay1 = Dense(256, activation="relu") (lay1)
-        layv = Dense(self.len_act, activation = 'linear') (lay1)
-        self.targetq1 = keras.Model(inputs=inp, outputs=[layv])
-        self.targetq2 = keras.models.clone_model(self.targetq1)
-
-        model = keras.Model(inputs=inp, outputs=[lay1])
+        layb = Flatten() (layb)
+        lay2 = Dense(256, activation="relu") (layb)
+        layv = Dense(self.len_act, activation = 'linear') (lay2)
+        self.modelq2 = keras.Model(inputs=inp2, outputs=[layv])
 
 
 
-        inpp = Input(shape = (256,))
+        lay = concatenate([lay1, lay2])
+        model = keras.Model(inputs=[inp1,inp2], outputs=[lay])
+        inpp = Input(shape = (512,))
         lay = Dense(512, activation="linear") (inpp)
+        lay = Dense(256, activation="linear") (lay)
         layp = Dense(self.len_act, activation="softmax") (lay)
         self.modelpt = keras.Model(inputs=inpp, outputs=[layp])
 
         mp = self.modelpt(model.layers[-1].output)
-        self.modelp = keras.Model(inputs=inp, outputs=[mp])
+        self.modelp = keras.Model(inputs=[inp1,inp2], outputs=[mp])
+
+
+
+        inp1 = Input(shape = self.shape_state)
+        lay = Conv2D(16,(8,8), strides = (4,4),activation= 'relu',padding='same') (inp1)
+        lay = Conv2D(32,(4,4), strides = (2,2), activation= 'relu',padding='same') (lay)
+        layb = Conv2D(64,(3,3), strides = (1,1), activation= 'relu',padding='same') (lay)
+        lay1 = Flatten() (layb)
+        lay1 = Dense(256, activation="relu") (lay1)
+        layv = Dense(self.len_act, activation = 'linear') (lay1)
+        self.targetq1 = keras.Model(inputs=inp1, outputs=[layv])
+
+
+        inp2 = Input(shape = self.shape_state)
+        lay = Conv2D(16,(8,8), strides = (4,4),activation= 'relu',padding='same') (inp2)
+        lay = Conv2D(32,(4,4), strides = (2,2), activation= 'relu',padding='same') (lay)
+        layb = Conv2D(64,(3,3), strides = (1,1), activation= 'relu',padding='same') (lay)
+        lay2 = Flatten() (layb)
+        lay2 = Dense(256, activation="relu") (lay2)
+        layv = Dense(self.len_act, activation = 'linear') (lay2)
+        self.targetq2 = keras.Model(inputs=inp2, outputs=[layv])
+
+
 
 
 
@@ -217,7 +239,7 @@ class sac:
         self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.00025)
         self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.00025)
         self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.0006)
-        self.alphav = tf.Variable(0.04)
+        self.alphav = tf.Variable(2.0)
         self.max_alpha = 0.01
 
 
@@ -244,8 +266,8 @@ class sac:
     @tf.function
     def get_net_res(self,l_state):
         inp = tf.cast(l_state,tf.float32)/255.0
-        out = self.modelp(inp , training = False)
-        out = tf.clip_by_value(out,0.001,0.992)
+        out = self.modelp([inp,inp] , training = False)
+        #out = tf.clip_by_value(out,0.001,0.992)
 
         return out
 
@@ -262,8 +284,6 @@ class sac:
 
         vars = [i for i in range(self.len_act)]
         index = numpy.array(choices(vars, out[0])[0])
-
-
         return index, out[0]
 
 
@@ -295,8 +315,8 @@ class sac:
             #api = tf.gather_nd(batch_dims=1,params = y_pi,indices  = acts1)
 
             targ = (targ1+targ2)*0.5
-            y_pi = self.modelp(inp_next1, training = True)
-            y_pi = tf.clip_by_value(y_pi,1e-07,0.99999999)
+            y_pi = self.modelp([inp_next1,inp_next1], training = True)
+            y_pi = tf.clip_by_value(y_pi,1e-12,0.99999999999)
 
             logpi = tf.math.log(y_pi)
             q1 =  tf.gather_nd(batch_dims=1,params = qv1,indices  = actn)
@@ -304,9 +324,9 @@ class sac:
 
             #qt1 =  tf.gather_nd(batch_dims=1,params = tqv1,indices  = actn)
             #qt2 =  tf.gather_nd(batch_dims=1,params = tqv2,indices  = actn)
+            sr = tf.reduce_mean(abs(targ))*0.1
 
-
-            dift = tf.reduce_sum((targ-tf.stop_gradient(self.alphav)*logpi)*y_pi, axis=-1)
+            dift = tf.reduce_sum((targ-tf.stop_gradient(self.alphav)*logpi)*y_pi*sr, axis=-1)
 
             qvt =  tf.stop_gradient(rew+self.gamma*dift*(1-dones))
 
@@ -329,18 +349,18 @@ class sac:
         gradsa = tape1.gradient(lossq, trainable_varsa)
 
         with tf.GradientTape() as tape2:
-            y_pii = self.modelp(inp1, training = True)
-            y_pii = tf.clip_by_value(y_pii,1e-07,0.99999999)
+            y_pii = self.modelp([inp1,inp1], training = True)
+            y_pii = tf.clip_by_value(y_pii,1e-12,0.9999999999999)
 
 
             logpi = tf.math.log(y_pii)
             minq = tf.stop_gradient((qv1+qv2)*0.5)
 
-            diflm = tf.reduce_sum(y_pii*(tf.stop_gradient(self.alphav)*logpi - minq),axis=-1)
+            diflm = tf.reduce_sum(y_pii*(tf.stop_gradient(self.alphav)*logpi*sr - minq),axis=-1)
             dm = tf.reduce_mean(diflm)
+            #lossmin = tf.reduce_mean(tf.math.exp(-y_pii/0.0001))
 
-
-            lossp = dm
+            lossp = dm#+lossmin
 
             trainable_vars2 = self.modelpt.trainable_variables
         grads2 = tape2.gradient(lossp, trainable_vars2)
