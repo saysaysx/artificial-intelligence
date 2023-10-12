@@ -184,7 +184,6 @@ class sac:
         layv = Dense(self.len_act, activation = 'linear') (lay1)
         self.modelq1 = keras.Model(inputs=inp1, outputs=[layv])
 
-
         inp2 = Input(shape = self.shape_state)
         lay = Conv2D(16,(8,8), strides = (4,4),activation= 'relu',padding='same') (inp2)
         lay = Conv2D(32,(4,4), strides = (2,2), activation= 'relu',padding='same') (lay)
@@ -193,8 +192,6 @@ class sac:
         lay2 = Dense(256, activation="relu") (layb)
         layv = Dense(self.len_act, activation = 'linear') (lay2)
         self.modelq2 = keras.Model(inputs=inp2, outputs=[layv])
-
-
 
         lay = concatenate([lay1, lay2])
         model = keras.Model(inputs=[inp1,inp2], outputs=[lay])
