@@ -27,6 +27,8 @@ from tensorflow.keras.layers import MaxPooling2D
 import tensorflow as tf
 import keras.backend as K
 
+numpy.set_printoptions(precision=4)
+
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
 
@@ -228,7 +230,7 @@ class sac:
 
 
         self.cur_reward = 0.0
-        self.max_reward = 0.0
+        self.max_reward = 1.0
         self.rand_true = False
 
         self.cur_reward100 = 0.0
@@ -456,22 +458,22 @@ class sac:
 
             if self.fl_mod:
                 if(random.random()>0.999):
-                    self.alphav = tf.Variable(0.01)
+                    self.alphav = tf.Variable(0.008)
             else:
                 self.alphav = tf.Variable(0.003)
 
 
             if(self.index%4000==0 and self.buf_index>self.T):
-                print(f"index {self.index} alphav {self.alphav.numpy()} lossq {lossq}  lossp {lossp} qv {qv}  qvt {qvt} acts {self.policies[self.buf_index-1:self.buf_index]} rew {self.cur_reward100} ")
+                print(f"index {self.index} alphav {self.alphav.numpy():.{3}f} lossq {lossq:.{3}e}  lossp {lossp:.{3}e} qv {qv:.{4}e}  qvt {qvt:.{4}e} acts {self.policies[self.buf_index-1:self.buf_index]} rew {self.cur_reward100:.{3}f} ")
                 self.cur_reward = 0
 
                 self.show()
                 if(self.index%32000==0):
                     plt.plot(self.xindex,self.rewardy)
-                    plt.savefig("./out/figure_rew3.png")
+                    plt.savefig("./out/figure_rew6.png")
                     plt.close()
                     df = pandas.DataFrame({'x': self.xindex, 'y': self.rewardy})
-                    df.to_excel('./out/file_name3.xlsx', index=False)
+                    df.to_excel('./out/file_name6.xlsx', index=False)
 
 
         self.index = self.index+1
