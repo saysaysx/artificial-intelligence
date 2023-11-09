@@ -337,7 +337,7 @@ class sac:
                     qv.append(self.modelq[i](inp1, training = True))
                     targ.append(self.targetq[i](inp_next1, training = True))
 
-                minq = tf.minimum(targ[0],targ[1])
+                minq = (targ[0]+targ[1])*0.5
                 y_pi = self.modelp[num](inp_next1, training = True)
                 y_pi = tf.clip_by_value(y_pi,1e-15,0.99999999999999999)
                 logpi = tf.math.log(y_pi)
@@ -377,7 +377,7 @@ class sac:
             targ.append(self.tarup1(inp_next1, training = True))
             targ.append(self.tarup2(inp_next1, training = True))
 
-            minq = tf.minimum(targ[0],targ[1])
+            minq = (targ[0]+targ[1])*0.5
             y_pi = self.mupp(inp_next1, training = True)
             y_pi = tf.clip_by_value(y_pi,1e-15,0.99999999999999999)
             logpi = tf.math.log(y_pi)
@@ -414,7 +414,7 @@ class sac:
                 logpi = tf.math.log(y_pii)
                 entr = - tf.reduce_mean(tf.reduce_sum(y_pii*logpi, axis=-1))
                 ypi_border = tf.reduce_mean(tf.math.exp(-y_pii/0.00001))*1e+3#tf.reduce_mean(tf.nn.relu(1e-7 - y_pii))*1e+7
-                minq1 = tf.minimum(qv[0],qv[1])
+                minq1 = (qv[0]+qv[1])*0.5
                 minq = tf.stop_gradient(minq1)
                 diflm = tf.reduce_sum(y_pii*(tf.stop_gradient(self.alphav[modi])*logpi - minq),axis=-1)
                 dm = tf.reduce_mean(diflm)
@@ -437,7 +437,7 @@ class sac:
             logpi = tf.math.log(y_pii)
             entr = - tf.reduce_mean(tf.reduce_sum(y_pii*logpi, axis=-1))
             ypi_border = tf.reduce_mean(tf.math.exp(-y_pii/0.00001))*1e+3
-            minq1 = tf.minimum(qv1,qv2)
+            minq1 = (qv1+qv2)*0.5
             minq = tf.stop_gradient(minq1)
             diflm = tf.reduce_sum(y_pii*(tf.stop_gradient(self.alphavup)*logpi - minq),axis=-1)
             dm = tf.reduce_mean(diflm)
