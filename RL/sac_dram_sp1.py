@@ -37,7 +37,7 @@ sess.as_default()
 
 class environment():
     def __init__(self):
-        self.env = gym.make("MsPacman-ram-v4", render_mode="rgb_array")
+        self.env = gym.make("Breakout-ram-v4", render_mode="rgb_array")
 
         #self.env = wr.AtariWrapper(self.env,frame_skip=1, terminal_on_life_loss=False)
         #self.env = wr.NoopResetEnv(self.env)
@@ -181,10 +181,10 @@ class sac:
         lay = Dense(300) (lay)
         lay = LeakyReLU(0.01)(lay)
         lay = Dense(200) (lay)
-        lay = LeakyReLU(0.01)(lay)
+        lay = LeakyReLU(0.001)(lay)
 
         lay = Dense(460) (lay)
-        lay = LeakyReLU(0.01)(lay)
+        lay = LeakyReLU(0.001)(lay)
 
 
         layv1 = Dense(self.len_act, activation = 'linear') (lay)
@@ -205,9 +205,9 @@ class sac:
         inp1 = Input(shape = self.shape_state)
         lay = Flatten() (inp1)
         lay = Dense(400) (lay)
-        lay = LeakyReLU(0.01)(lay)
+        lay = LeakyReLU(0.001)(lay)
         lay = Dense(300) (lay)
-        lay = LeakyReLU(0.01)(lay)
+        lay = LeakyReLU(0.001)(lay)
 
         lay1 = Dense(400, activation="linear") (lay)
         layp1 = Dense(self.len_act, activation="softmax") (lay1)
@@ -228,13 +228,23 @@ class sac:
 
         self.targetq = [keras.models.clone_model(self.modelq[0]) for i in range(self.nnets)]
 
+        self.nrewards  = 4
+        self.max_rewards = numpy.array([0.0]*self.nrewards)
+        self.max_nets = [[]]*self.nrewards
+        for i in range(self.nrewards):
+            self.max_nets[i] = (keras.models.clone_model(self.modelp),
+                                keras.models.clone_model(self.targetq[0]), keras.models.clone_model(self.targetq[1]),
+                                keras.models.clone_model(self.modelq[0]), keras.models.clone_model(self.modelq[1]))
+        self.modelmp = keras.models.clone_model(self.modelp)
+
+
         tf.keras.utils.plot_model(self.modelq[0], to_file='./out/netq.png', show_shapes=True)
         tf.keras.utils.plot_model(self.targetq[0], to_file='./out/nettq1.png', show_shapes=True)
         tf.keras.utils.plot_model(self.modelp, to_file='./out/netp.png', show_shapes=True)
 
 
-        self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.0002)
-        self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.0002)
+        self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.00025)
+        self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.00025)
         self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.0004)
 
         self.alphav = tf.Variable(0.001)
@@ -243,6 +253,7 @@ class sac:
         print(self.entrmax)
 
         self.max_alpha = 0.01
+        self.al_value = 1.0
 
 
         self.cur_reward = 0.0
@@ -366,13 +377,17 @@ class sac:
                 qv.append(self.modelq[i](inp1, training = True))
 
             y_pii = self.modelp(inp1, training = True)
+            y_piim = self.modelmp(inp1, training = True)
             y_pii = tf.clip_by_value(y_pii,1e-15,0.99999999999999)
 
+            #rst1 = tf.reduce_mean(tf.reduce_sum(y_piim[0]*tf.math.log(y_piim[0]/y_pii[0]), axis=-1))
+            #rst2 = tf.reduce_mean(tf.reduce_sum(y_piim[1]*tf.math.log(y_piim[1]/y_pii[1]), axis=-1))
 
 
             logpi = tf.math.log(y_pii)
             entr = - tf.reduce_mean(tf.reduce_sum(y_pii[0]*logpi[0], axis=-1))
-            ypi_border = tf.reduce_mean(tf.math.exp(-y_pii/0.0001))*1000.0
+            ypi_border1 = tf.reduce_mean(tf.math.exp(-y_pii[0]/0.000001))*100.0
+            ypi_border2 = tf.reduce_mean(tf.math.exp(-y_pii[1]/0.0001))*100.0
 
 
             minq1 = tf.minimum(qv[0], qv[1])
@@ -390,7 +405,7 @@ class sac:
             dm = tf.reduce_mean(diflm1+diflm2)
 
 
-            lossp = dm + ypi_border + (la2c1+la2c2)*0.001#+ tf.square(0.01-dify)*1000.0#+kb*0.0001 #+ tf.nn.relu(self.entrmax*0.01-entr)*10 #+ corrdisp*maxq*0.05 #+ tf.reduce_mean(val)*maxq*0.02 #+ tf.reduce_mean(entr)*maxq*0.0005
+            lossp = dm + ypi_border1+ypi_border2 #+ tf.nn.relu(rst1-0.2)+tf.nn.relu(rst2-0.2)#+ (la2c1+la2c2)*0.001#+ tf.square(0.01-dify)*1000.0#+kb*0.0001 #+ tf.nn.relu(self.entrmax*0.01-entr)*10 #+ corrdisp*maxq*0.05 #+ tf.reduce_mean(val)*maxq*0.02 #+ tf.reduce_mean(entr)*maxq*0.0005
 
             trainable_vars2 = self.modelp.trainable_variables
 
@@ -398,7 +413,7 @@ class sac:
 
         self.optimizer2.apply_gradients(zip(grads2, trainable_vars2))
 
-        return  lossp, ypi_border, entr
+        return  lossp, ypi_border1+ypi_border2, entr
 
 
 
@@ -414,6 +429,38 @@ class sac:
                 a.assign(a * (1-tau[i]) + b*tau[i])
         return
 
+    @tf.function
+    def train_dif_ev(self, inum1, inum2):
+        tau = [0.5,0.5]
+        tf.print(inum1, " ",inum2)
+        al = random.random()*0.01
+        for i in range(2):
+            target_weights = self.targetq[i].trainable_variables
+            weights1 = self.max_nets[inum1][int(i+1)].trainable_variables
+            weights2 = self.max_nets[inum2][int(i+1)].trainable_variables
+
+            for (a, m1, m2) in zip(target_weights, weights1, weights2):
+                al1 = random.random()*0.0005
+                a.assign(a+(m2-m1)*(al+al1))
+
+        for i in range(2):
+            target_weights = self.modelq[i].trainable_variables
+            weights1 = self.max_nets[inum1][int(i+3)].trainable_variables
+            weights2 = self.max_nets[inum2][int(i+3)].trainable_variables
+            for (a, m1,m2) in zip(target_weights, weights1, weights2):
+                al1 = random.random()*0.0005
+                a.assign(a+(m2-m1)*(al+al1))
+
+
+        #target_weights = self.modelp.trainable_variables
+        #weights1 = self.max_nets[inum1][0].trainable_variables
+        #weights2 = self.max_nets[inum2][0].trainable_variables
+        #for (a, m1,m2) in zip(target_weights, weights1, weights2):
+        #    al1 = random.random()*0.0005
+        #    a.assign(a+(m2-m1)*(al+al1))
+
+        tf.print("make dif ev")
+        return
 
 
 
@@ -488,8 +535,39 @@ class sac:
 
                 if self.cur_reward100 > self.max_reward:
                     self.max_reward = self.cur_reward100
+                #inum = int(self.nrewards*random.random()*0.9999)
+                inum = self.max_rewards.argmin()
+                mean = self.max_rewards.mean()
+                #if self.cur_reward100 > self.max_rewards[inum]:
 
-                    self.targetp.set_weights(self.modelp.get_weights())
+
+                self.max_rewards[inum] = self.cur_reward100
+                self.max_nets[inum][0].set_weights(self.modelp.get_weights())
+                self.max_nets[inum][1].set_weights(self.targetq[0].get_weights())
+                self.max_nets[inum][2].set_weights(self.targetq[1].get_weights())
+
+                self.max_nets[inum][3].set_weights(self.modelq[0].get_weights())
+                self.max_nets[inum][4].set_weights(self.modelq[1].get_weights())
+
+
+
+
+                val = numpy.arange(self.nrewards)
+                val = numpy.delete(val, inum)
+                numpy.random.shuffle(val)
+                if self.max_rewards[val[0]]>self.max_rewards[val[1]]:
+                    vl = val[0]
+                    val[0] = val[1]
+                    val[1] = vl
+
+                if(self.cur_reward100 < mean):
+                    self.train_dif_ev(int(val[0]),int(val[1]))
+
+
+
+
+
+
 
 
         if self.flag:
@@ -509,7 +587,7 @@ class sac:
 
 
             if(self.index%4000==0 and self.buf_index>self.T):
-                print(f"index {self.index} alphav {self.alphav.numpy():.{3}f} {self.rand_true} lossq {lossq:.{2}e}  lossp {lossp:.{2}e} qv {qv:.{2}f}  qvt {qvt:.{2}f} acts {self.policies[self.buf_index-1:self.buf_index]} rew {self.cur_reward100:.{3}f} ")
+                print(f"index {self.index} maxrew {self.max_rewards} lossq {lossq:.{2}e}  lossp {lossp:.{2}e} qv {qv:.{2}f}  qvt {qvt:.{2}f} acts {self.policies[self.buf_index-1:self.buf_index]} rew {self.cur_reward100:.{3}f} ")
                 self.cur_reward = 0
 
                 self.show()
