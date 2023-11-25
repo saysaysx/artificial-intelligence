@@ -179,12 +179,14 @@ class sac:
         inp1 = Input(shape = self.shape_state)
         lay = Flatten() (inp1)
         lay = Dense(300) (lay)
-        lay = LeakyReLU(0.01)(lay)
-        lay = Dense(200) (lay)
-        lay = LeakyReLU(0.001)(lay)
+        lay = LeakyReLU(0.1)(lay)
+        lay = Dropout(0.01) (lay)
+        lay = Dense(300) (lay)
+        lay = LeakyReLU(0.1)(lay)
+        lay = Dropout(0.01) (lay)
 
-        lay = Dense(460) (lay)
-        lay = LeakyReLU(0.001)(lay)
+        lay = Dense(300) (lay)
+        lay = LeakyReLU(0.1)(lay)
 
 
         layv1 = Dense(self.len_act, activation = 'linear') (lay)
@@ -204,15 +206,18 @@ class sac:
 
         inp1 = Input(shape = self.shape_state)
         lay = Flatten() (inp1)
-        lay = Dense(400) (lay)
-        lay = LeakyReLU(0.001)(lay)
         lay = Dense(300) (lay)
-        lay = LeakyReLU(0.001)(lay)
 
-        lay1 = Dense(400, activation="linear") (lay)
+        lay = LeakyReLU(0.1)(lay)
+        lay = Dropout(0.01) (lay)
+        lay = Dense(300) (lay)
+        lay = LeakyReLU(0.1)(lay)
+        lay = Dropout(0.01) (lay)
+
+        lay1 = Dense(300, activation="linear") (lay)
         layp1 = Dense(self.len_act, activation="softmax") (lay1)
 
-        lay2 = Dense(400, activation="linear") (lay)
+        lay2 = Dense(300, activation="linear") (lay)
         layp2 = Dense(self.len_act, activation="softmax") (lay2)
 
 
@@ -243,8 +248,8 @@ class sac:
         tf.keras.utils.plot_model(self.modelp, to_file='./out/netp.png', show_shapes=True)
 
 
-        self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.00025)
-        self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.00025)
+        self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.0002)
+        self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.0002)
         self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.0004)
 
         self.alphav = tf.Variable(0.001)
@@ -433,14 +438,14 @@ class sac:
     def train_dif_ev(self, inum1, inum2):
         tau = [0.5,0.5]
         tf.print(inum1, " ",inum2)
-        al = random.random()*0.01
+        al = random.random()*0.5
         for i in range(2):
             target_weights = self.targetq[i].trainable_variables
             weights1 = self.max_nets[inum1][int(i+1)].trainable_variables
             weights2 = self.max_nets[inum2][int(i+1)].trainable_variables
 
             for (a, m1, m2) in zip(target_weights, weights1, weights2):
-                al1 = random.random()*0.0005
+                al1 = random.random()*0.01
                 a.assign(a+(m2-m1)*(al+al1))
 
         for i in range(2):
@@ -448,7 +453,7 @@ class sac:
             weights1 = self.max_nets[inum1][int(i+3)].trainable_variables
             weights2 = self.max_nets[inum2][int(i+3)].trainable_variables
             for (a, m1,m2) in zip(target_weights, weights1, weights2):
-                al1 = random.random()*0.0005
+                al1 = random.random()*0.00005
                 a.assign(a+(m2-m1)*(al+al1))
 
 
@@ -537,7 +542,7 @@ class sac:
                     self.max_reward = self.cur_reward100
                 #inum = int(self.nrewards*random.random()*0.9999)
                 inum = self.max_rewards.argmin()
-                mean = self.max_rewards.mean()
+                mean = self.max_rewards.max()
                 #if self.cur_reward100 > self.max_rewards[inum]:
 
 
@@ -560,8 +565,8 @@ class sac:
                     val[0] = val[1]
                     val[1] = vl
 
-                if(self.cur_reward100 < mean):
-                    self.train_dif_ev(int(val[0]),int(val[1]))
+                #if(self.cur_reward100 < mean*0.9):
+                    #self.train_dif_ev(int(val[0]),int(val[1]))
 
 
 
