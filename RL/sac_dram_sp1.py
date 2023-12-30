@@ -19,8 +19,8 @@ tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
 
 import tensorflow.keras as keras
 from tensorflow.keras.layers import Dense, Input, concatenate, BatchNormalization, Dropout, Conv2D, Reshape, Flatten
-from tensorflow.keras.layers import MaxPooling1D, Permute, Conv1D, LSTM, LeakyReLU
-
+from tensorflow.keras.layers import MaxPooling1D, Permute, Conv1D, LSTM, LeakyReLU, Cropping1D, Multiply, Softmax, GaussianNoise
+from tensorflow.keras.layers import RepeatVector, Subtract, MaxPooling2D, AveragePooling2D,AveragePooling1D
 import tensorflow as tf
 import keras.backend as K
 
@@ -169,61 +169,75 @@ class sac:
             y = keras.layers.Conv2D(filters = filt,kernel_size=size,activation = 'tanh',padding='same') (y)
             return y
 
+        def rescale(x):
+
+            #m1 = LeakyReLU(1e-10) (x*1/16-)
+            #y1 = x#concatenate([x/255, m1/16])
+            #y2 = x//16
+            #y3 = x&0b00000100//4
+            #y4 = x&0b00001000//8
+            #y5 = x&0b00010000//16
+            #y6 = x&0b00100000//32
+            #y7 = x&0b01000000//64
+            #y8 = x//128
+
+            #y = concatenate([y1, y2])/16-0.5
+
+            y =  tf.cast(x, tf.float32)/512-0.25
+            y = Reshape((512,)) (y)
 
 
 
+            return y
 
         print("Shape")
         print(self.shape_state)
 
-        inp1 = Input(shape = self.shape_state)
-        lay = Flatten() (inp1)
-        lay = Dense(300) (lay)
-        lay = LeakyReLU(0.1)(lay)
-        lay = Dropout(0.01) (lay)
-        lay = Dense(300) (lay)
-        lay = LeakyReLU(0.1)(lay)
-        lay = Dropout(0.01) (lay)
+        inp1 = Input(shape = self.shape_state,  dtype='uint8')
 
-        lay = Dense(300) (lay)
-        lay = LeakyReLU(0.1)(lay)
+        lay = rescale(inp1)
 
-
+        lay = Dense(300, activation = 'relu') (lay)
+        lay = Dense(200, activation = 'relu') (lay)
         layv1 = Dense(self.len_act, activation = 'linear') (lay)
 
 
-
-        self.nnets = 4
+        self.nnets = 2
         self.modelq = [[]]*self.nnets
         self.modelq[0] = keras.Model(inputs=inp1, outputs=[layv1])
-        for i in range(1,self.nnets):
-            self.modelq[i] = keras.models.clone_model(self.modelq[0])
 
+        tf.keras.utils.plot_model(self.modelq[0], to_file='./out/netq.png', show_shapes=True)
+        #for i in range(1,self.nnets):
+        #    self.modelq[i] = keras.models.clone_model(self.modelq[0])
 
+        self.modelq[1] = keras.models.clone_model(self.modelq[0])
 
         print("------------")
         print(self.shape_state)
 
-        inp1 = Input(shape = self.shape_state)
-        lay = Flatten() (inp1)
-        lay = Dense(300) (lay)
+        inp1 = Input(shape = self.shape_state, dtype='uint8' )
+        #layc1 = Cropping1D((0,1)) (inp1)
+        #layc2 = Cropping1D((1,0)) (inp1)
+        #layc = Multiply()([layc1,layc2])
+        #layc = concatenate([inp1, layc], axis=1)
+        lay_r = rescale(inp1)
 
-        lay = LeakyReLU(0.1)(lay)
-        lay = Dropout(0.01) (lay)
-        lay = Dense(300) (lay)
-        lay = LeakyReLU(0.1)(lay)
-        lay = Dropout(0.01) (lay)
 
-        lay1 = Dense(300, activation="linear") (lay)
+
+        lay = Dense(300, activation = 'relu') (lay_r)
+        lay = Dense(250, activation = 'relu') (lay)
+        lay = Dense(350, activation = 'relu') (lay)
+
+        lay1 = Dense(100, activation="linear") (lay)
         layp1 = Dense(self.len_act, activation="softmax") (lay1)
+        lay2 = Dense(200, activation="linear") (lay)
 
-        lay2 = Dense(300, activation="linear") (lay)
         layp2 = Dense(self.len_act, activation="softmax") (lay2)
 
 
 
         self.modelp = keras.Model(inputs=inp1, outputs=[layp1, layp2])
-
+        self.model_exp= keras.Model(inputs=inp1, outputs=[lay_r])
 
 
         self.targetp = keras.models.clone_model(self.modelp)
@@ -231,7 +245,7 @@ class sac:
 
 
 
-        self.targetq = [keras.models.clone_model(self.modelq[0]) for i in range(self.nnets)]
+        self.targetq = [keras.models.clone_model(self.modelq[i]) for i in range(self.nnets)]
 
         self.nrewards  = 4
         self.max_rewards = numpy.array([0.0]*self.nrewards)
@@ -243,16 +257,16 @@ class sac:
         self.modelmp = keras.models.clone_model(self.modelp)
 
 
-        tf.keras.utils.plot_model(self.modelq[0], to_file='./out/netq.png', show_shapes=True)
+
         tf.keras.utils.plot_model(self.targetq[0], to_file='./out/nettq1.png', show_shapes=True)
         tf.keras.utils.plot_model(self.modelp, to_file='./out/netp.png', show_shapes=True)
 
 
-        self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.0002)
-        self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.0002)
+        self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.00025)
+        self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.00025)
         self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.0004)
 
-        self.alphav = tf.Variable(0.001)
+        self.alphav = tf.Variable(0.0031)
         p = 1/self.len_act
         self.entrmax = tf.cast(- tf.math.log(p), tf.float32)
         print(self.entrmax)
@@ -291,8 +305,11 @@ class sac:
 
     @tf.function
     def get_net_res(self,l_state):
-        inp = tf.cast(l_state,tf.float32)/255.0 - 0.5
+        inp = l_state
         out = self.modelp(inp , training = False)
+        #val = self.model_exp(inp , training = False)
+        #tf.print(val)
+
         #out = tf.clip_by_value(out,0.001,0.992)
         return out
 
@@ -311,10 +328,13 @@ class sac:
         out1 = out[indv][0].numpy()
         #if random.random()>0.999:
         #    out1[:] = 1.0/self.len_act
+        fl = out1 < 0.0001
+        if(fl.any() and random.random()>0.9):
+            index = int(self.len_act*random.random()*0.99999)
+        else:
+            index = numpy.random.choice(self.len_act, 1, p = out1) [0]
 
 
-        vars = [i for i in range(self.len_act)]
-        index = numpy.array(choices(vars, out1)[0])
         return index, out1
 
 
@@ -322,15 +342,15 @@ class sac:
     @tf.function
     def train_q1(self, inp, inp_next, actn, rew, dones):
         with tf.GradientTape(persistent=True) as tape1:
-            inp1 = inp / 255.0 - 0.5
-            inp_next1 = inp_next / 255.0 - 0.5
+            inp1 = inp
+            inp_next1 = inp_next
             qv = []
             targ = []
-            #tqv = []
+            tqv = []
             for i in range(2):
                 qv.append(self.modelq[i](inp1, training = True))
                 targ.append(self.targetq[i](inp_next1, training = True))
-                #tqv.append(self.targetq[i](inp1, training = True))
+                tqv.append(self.targetq[i](inp1, training = True))
 
 
             y_pi = self.modelp(inp_next1, training = True)
@@ -339,10 +359,12 @@ class sac:
             logpi = tf.math.log(y_pi)
 
             q = []
+            qt = []
 
 
             for i in range(2):
                 q.append(tf.gather_nd(batch_dims=1,params = qv[i],indices  = actn))
+                qt.append( tf.gather_nd(batch_dims=1,params = tqv[i],indices  = actn))
 
 
             minq1 = tf.minimum(targ[0] , targ[1])
@@ -358,13 +380,30 @@ class sac:
             dif = []
 
             for i in range(2):
-               dif.append(tf.math.square(q[i]-qvt[i]))
+               dif1a = tf.math.square(q[i]-qvt[i])
+               #dif1b = tf.math.square(qt[i]+tf.clip_by_value(q[i]-qt[i],-0.2,0.2)-qvt[i])
+               #dif.append(tf.maximum(dif1a,dif1b))
+               dif.append(dif1a)
 
             lossq = tf.reduce_mean(dif[0]+dif[1])
 
 
             trainable_varsa = self.modelq[0].trainable_variables+self.modelq[1].trainable_variables
+            #lossw = tf.convert_to_tensor(tf.reduce_mean(tf.math.square(trainable_varsa[0])))
+            #lossw = tf.reduce_mean(lossw)
+            lossq = lossq # + lossw
+
         gradsa = tape1.gradient(lossq, trainable_varsa)
+
+        #divkb = tf.convert_to_tensor([tf.reduce_max(tf.math.abs(grad)) for grad in gradsa])
+        #divkb = tf.reduce_max(divkb)
+        #if(divkb>9e-3):
+        #    gradsa = [grad*0.1 for grad in gradsa]
+        #else:
+        #    gradsa = [grad for grad in gradsa]
+
+
+
         self.optimizer1.apply_gradients(zip(gradsa, trainable_varsa))
         return lossq
 
@@ -374,7 +413,7 @@ class sac:
     @tf.function
     def train_actor1(self, inp):
         with tf.GradientTape() as tape2:
-            inp1 = inp / 255.0 - 0.5
+            inp1 = inp
 
             qv = []
 
@@ -382,7 +421,7 @@ class sac:
                 qv.append(self.modelq[i](inp1, training = True))
 
             y_pii = self.modelp(inp1, training = True)
-            y_piim = self.modelmp(inp1, training = True)
+            #y_piim = self.modelmp(inp1, training = True)
             y_pii = tf.clip_by_value(y_pii,1e-15,0.99999999999999)
 
             #rst1 = tf.reduce_mean(tf.reduce_sum(y_piim[0]*tf.math.log(y_piim[0]/y_pii[0]), axis=-1))
@@ -391,34 +430,36 @@ class sac:
 
             logpi = tf.math.log(y_pii)
             entr = - tf.reduce_mean(tf.reduce_sum(y_pii[0]*logpi[0], axis=-1))
-            ypi_border1 = tf.reduce_mean(tf.math.exp(-y_pii[0]/0.000001))*100.0
-            ypi_border2 = tf.reduce_mean(tf.math.exp(-y_pii[1]/0.0001))*100.0
+            #divkb = tf.reduce_mean(tf.reduce_sum(y_pii[0]*(logpi[0]-logpi[1]) + y_pii[1]*(logpi[1]-logpi[0]), axis=-1))
+
+            #ypi_border1 = tf.reduce_mean(tf.math.exp(-y_pii[0]/0.00005))
+            #ypi_border2 = tf.reduce_mean(tf.math.exp(-y_pii[1]/0.00008))
+
+            #ypi_border1 = tf.reduce_mean(tf.nn.relu(0.00005-y_pii[0]))*1000
+            #ypi_border2 = tf.reduce_mean(tf.nn.relu(0.00007-y_pii[1]))*1000
 
 
             minq1 = tf.minimum(qv[0], qv[1])
-
-
-            la2c1  = - tf.reduce_mean(logpi[0]*minq1)
-            la2c2  = - tf.reduce_mean(logpi[1]*minq1)
-
 
             diflm1 = tf.reduce_sum(y_pii[0]*(tf.stop_gradient(self.alphav)*logpi[0] - minq1),axis=-1)
             diflm2 = tf.reduce_sum(y_pii[1]*(tf.stop_gradient(self.alphav)*logpi[1] - minq1),axis=-1)
 
             #dst = tf.reduce_mean(tf.math.abs(y_pii1[0] - y_pii1[1]))*0.001
 
-            dm = tf.reduce_mean(diflm1+diflm2)
-
-
-            lossp = dm + ypi_border1+ypi_border2 #+ tf.nn.relu(rst1-0.2)+tf.nn.relu(rst2-0.2)#+ (la2c1+la2c2)*0.001#+ tf.square(0.01-dify)*1000.0#+kb*0.0001 #+ tf.nn.relu(self.entrmax*0.01-entr)*10 #+ corrdisp*maxq*0.05 #+ tf.reduce_mean(val)*maxq*0.02 #+ tf.reduce_mean(entr)*maxq*0.0005
+            dm = tf.reduce_mean(diflm1+diflm2) #+ tf.math.exp(-divkb/0.0005)
+            lossp = dm  #+ ypi_border1#+ tf.nn.relu(rst1-0.2)+tf.nn.relu(rst2-0.2)#+ (la2c1+la2c2)*0.001#+ tf.square(0.01-dify)*1000.0#+kb*0.0001 #+ tf.nn.relu(self.entrmax*0.01-entr)*10 #+ corrdisp*maxq*0.05 #+ tf.reduce_mean(val)*maxq*0.02 #+ tf.reduce_mean(entr)*maxq*0.0005
 
             trainable_vars2 = self.modelp.trainable_variables
+            #lossw = tf.convert_to_tensor(tf.reduce_mean(tf.math.square(trainable_vars2[0])) )
+            #lossw = tf.reduce_mean(lossw)
+            lossp = lossp  #+ 0.5*lossw
+
 
         grads2 = tape2.gradient(lossp, trainable_vars2)
 
         self.optimizer2.apply_gradients(zip(grads2, trainable_vars2))
 
-        return  lossp, ypi_border1+ypi_border2, entr
+        return  lossp, 0.0, entr
 
 
 
@@ -477,8 +518,8 @@ class sac:
 
         indices = numpy.random.choice(max_count, self.T)
 
-        inp_next = tf.cast(self.states[indices] ,tf.float32)
-        inp = tf.cast(self.previous_states[indices],tf.float32)
+        inp_next = tf.cast(self.states[indices] ,tf.uint8)
+        inp = tf.cast(self.previous_states[indices],tf.uint8)
 
         acts = tf.cast(self.acts[indices] ,tf.int32)
         rews = tf.cast(self.rews[indices] ,tf.float32)
@@ -543,6 +584,9 @@ class sac:
                 #inum = int(self.nrewards*random.random()*0.9999)
                 inum = self.max_rewards.argmin()
                 mean = self.max_rewards.max()
+
+
+                #self.alphav = tf.Variable(0.003+self.cur_reward100*0.0005)
                 #if self.cur_reward100 > self.max_rewards[inum]:
 
 
@@ -592,16 +636,16 @@ class sac:
 
 
             if(self.index%4000==0 and self.buf_index>self.T):
-                print(f"index {self.index} maxrew {self.max_rewards} lossq {lossq:.{2}e}  lossp {lossp:.{2}e} qv {qv:.{2}f}  qvt {qvt:.{2}f} acts {self.policies[self.buf_index-1:self.buf_index]} rew {self.cur_reward100:.{3}f} ")
+                print(f"index {self.index} {self.alphav.numpy():.{2}e} maxrew {self.max_rewards} lossq {lossq:.{2}e}  lossp {lossp:.{2}e} qv {qv:.{2}e}  qvt {qvt:.{2}e} acts {self.policies[self.buf_index-1:self.buf_index]} rew {self.cur_reward100:.{3}f} ")
                 self.cur_reward = 0
 
                 self.show()
                 if(self.index%32000==0):
                     plt.plot(self.xindex,self.rewardy)
-                    plt.savefig("./out/figure_rew6.png")
+                    plt.savefig("./out/figure_rew7.png")
                     plt.close()
                     df = pandas.DataFrame({'x': self.xindex, 'y': self.rewardy})
-                    df.to_excel('./out/file_name6.xlsx', index=False)
+                    df.to_excel('./out/file_name7.xlsx', index=False)
 
 
         self.index = self.index+1
