@@ -33,7 +33,23 @@ sess = tf.compat.v1.Session(config=config)
 sess.as_default()
 
 
+def steps(n):
+    index = 0
+    def step():
+        nonlocal index
+        while True:
+            index = index + 1
 
+            if index>=n:
+                index = 0
+            if index%n==0:
+                yield True
+            else:
+                yield False
+
+
+
+    return step
 
 class environment():
     def __init__(self):
@@ -81,7 +97,7 @@ class environment():
 
 
         next_observation, reward, done, _,_ = self.env.step(act)
-        reward = reward / 10.0
+        reward = reward / 1.0
         next_observation = numpy.array(next_observation)
 
 
@@ -142,7 +158,7 @@ class sac:
         self.shape_state = env.get_shape_state()
         self.len_act = env.get_len_acts()
         self.gamma = 0.999
-        self.alpha = 0.5
+        self.alpha = tf.Variable(1.0)
 
 
         self.max_t = 10
@@ -183,11 +199,8 @@ class sac:
 
             #y = concatenate([y1, y2])/16-0.5
 
-            y =  tf.cast(x, tf.float32)/512-0.25
+            y =  tf.cast(x, tf.float32)/255-0.5
             y = Reshape((512,)) (y)
-
-
-
             return y
 
         print("Shape")
@@ -195,25 +208,61 @@ class sac:
 
         inp1 = Input(shape = self.shape_state,  dtype='uint8')
 
-        lay = rescale(inp1)
+        layres = rescale(inp1)
 
+        class CropLayer(tf.keras.layers.Layer):
+            def __init__(self, num):
+                super(CropLayer, self).__init__()
+                self.num = num
+            def build(self, input_shape):
+                #self.kernel = self.add_weight("kernel", shape=[0])
+                pass
+            def call(self, inputs):
+                val = tf.cast(tf.random.uniform(shape = [tf.shape(inputs)[0],1], maxval=self.num, dtype = tf.int32), tf.float32)/self.num
+                out = tf.concat([inputs,val],1)
+
+
+                return out , val
+            def get_config(self):
+                return {"num": self.num}
+
+
+
+        self.size_w = 32
+
+
+
+        self.tfindex = tf.repeat(tf.range(self.size_w)[None,:],  self.T, axis = 0)
+
+        print(tf.shape(self.tfindex))
+
+
+        layo, val = CropLayer(32)(layres)
+
+        lay = Dense(400, activation = 'linear') (layo)
+        lay = Dense(350, activation = 'relu') (lay)
         lay = Dense(300, activation = 'relu') (lay)
-        lay = Dense(200, activation = 'relu') (lay)
-        layv1 = Dense(self.len_act, activation = 'linear') (lay)
+        lay = Dense(350, activation = 'relu') (lay)
+        layv1 = Dense(self.len_act, activation = 'silu') (lay)
+        layv2 = Dense(self.size_w, activation = 'silu') (lay)
 
 
-        self.nnets = 2
+        self.nnets = 3
         self.modelq = [[]]*self.nnets
-        self.modelq[0] = keras.Model(inputs=inp1, outputs=[layv1])
+        self.modelq[0] = keras.Model(inputs=inp1, outputs=[layv1, val, layv2, layres])
 
         tf.keras.utils.plot_model(self.modelq[0], to_file='./out/netq.png', show_shapes=True)
         #for i in range(1,self.nnets):
         #    self.modelq[i] = keras.models.clone_model(self.modelq[0])
 
         self.modelq[1] = keras.models.clone_model(self.modelq[0])
-
+        self.modelq[2] = keras.models.clone_model(self.modelq[0])
         print("------------")
         print(self.shape_state)
+        self.step_s = steps(4)
+
+
+
 
         inp1 = Input(shape = self.shape_state, dtype='uint8' )
         #layc1 = Cropping1D((0,1)) (inp1)
@@ -224,20 +273,15 @@ class sac:
 
 
 
-        lay = Dense(300, activation = 'relu') (lay_r)
-        lay = Dense(250, activation = 'relu') (lay)
-        lay = Dense(350, activation = 'relu') (lay)
-
-        lay1 = Dense(100, activation="linear") (lay)
+        lay = Dense(300, activation = 'linear') (lay_r)
+        lay1 = Dense(250, activation = 'relu') (lay)
+        lay1 = Dense(150, activation = 'relu') (lay1)
+        lay1 = Dense(200, activation="linear") (lay1)
         layp1 = Dense(self.len_act, activation="softmax") (lay1)
-        lay2 = Dense(200, activation="linear") (lay)
 
-        layp2 = Dense(self.len_act, activation="softmax") (lay2)
-
-
-
-        self.modelp = keras.Model(inputs=inp1, outputs=[layp1, layp2])
+        self.modelp = keras.Model(inputs=inp1, outputs=layp1)
         self.model_exp= keras.Model(inputs=inp1, outputs=[lay_r])
+
 
 
         self.targetp = keras.models.clone_model(self.modelp)
@@ -255,6 +299,7 @@ class sac:
                                 keras.models.clone_model(self.targetq[0]), keras.models.clone_model(self.targetq[1]),
                                 keras.models.clone_model(self.modelq[0]), keras.models.clone_model(self.modelq[1]))
         self.modelmp = keras.models.clone_model(self.modelp)
+        self.maxtarg = keras.models.clone_model(self.targetq[0])
 
 
 
@@ -264,9 +309,16 @@ class sac:
 
         self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.00025)
         self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.00025)
-        self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.0004)
+        self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.000002)
 
-        self.alphav = tf.Variable(0.0031)
+        self.alphav = tf.Variable(0.02)
+        self.border = tf.Variable(0.3)
+
+        tens_r = tf.linspace(0.0, 1.0, num=17)
+        self.tens_r = tens_r[:,None,None]
+
+
+        tf.print(self.tens_r)
         p = 1/self.len_act
         self.entrmax = tf.cast(- tf.math.log(p), tf.float32)
         print(self.entrmax)
@@ -274,7 +326,7 @@ class sac:
         self.max_alpha = 0.01
         self.al_value = 1.0
 
-
+        self.qv = 0.01
         self.cur_reward = 0.0
         self.max_reward = 1.0
         self.rand_true = False
@@ -316,16 +368,16 @@ class sac:
     @tf.function
     def get_value_res(self,l_state):
 
-        val = self.modelq[0](l_state/255.0, training = False)[1]
+        val = self.modelq[0](l_state, training = False)[1]
         return val
 
     def get_net_act(self,l_state):
 
 
         out = self.get_net_res(numpy.array([l_state]))
-        indv = int(random.random()*1.9999999)
 
-        out1 = out[indv][0].numpy()
+
+        out1 = out[0].numpy()
         #if random.random()>0.999:
         #    out1[:] = 1.0/self.len_act
         fl = out1 < 0.0001
@@ -340,20 +392,26 @@ class sac:
 
 
     @tf.function
-    def train_q1(self, inp, inp_next, actn, rew, dones):
+    def train_q1(self, inp, inp_next, actn, rew, dones, pol):
         with tf.GradientTape(persistent=True) as tape1:
             inp1 = inp
             inp_next1 = inp_next
             qv = []
             targ = []
             tqv = []
+            #targmax = self.maxtarg(inp_next1, training = True )
+            win = []
             for i in range(2):
-                qv.append(self.modelq[i](inp1, training = True))
-                targ.append(self.targetq[i](inp_next1, training = True))
-                tqv.append(self.targetq[i](inp1, training = True))
+                qvl = self.modelq[i](inp1, training = True)
+
+                qv.append(qvl[0])
+                win.append((qvl[1],qvl[2], qvl[3]))
+                val = self.targetq[i](inp_next1, training = True)[0]
+                targ.append(val)
+                tqv.append(self.targetq[i](inp1, training = True)[0])
 
 
-            y_pi = self.modelp(inp_next1, training = True)
+            y_pi = pol#self.modelp(inp_next1, training = True)
 
             y_pi = tf.clip_by_value(y_pi,1e-15,0.99999999999999999)
             logpi = tf.math.log(y_pi)
@@ -365,42 +423,35 @@ class sac:
             for i in range(2):
                 q.append(tf.gather_nd(batch_dims=1,params = qv[i],indices  = actn))
                 qt.append( tf.gather_nd(batch_dims=1,params = tqv[i],indices  = actn))
-
-
-            minq1 = tf.minimum(targ[0] , targ[1])
-
-            dift1 = tf.reduce_sum((minq1-tf.stop_gradient(self.alphav)*logpi[0])*y_pi[0], axis=-1)
-            dift2 = tf.reduce_sum((minq1-tf.stop_gradient(self.alphav)*logpi[1])*y_pi[1], axis=-1)
-            qvt = []
-
-            qvt.append(tf.stop_gradient(rew+self.gamma*dift1*(1-dones)))
-            qvt.append(tf.stop_gradient(rew+self.gamma*dift2*(1-dones)))
-
-
+            minq = tf.minimum(targ[0] , targ[1])
+            dift1 = tf.reduce_sum((minq-tf.stop_gradient(self.alphav)*logpi)*y_pi, axis=-1)
+            qvt = tf.stop_gradient(rew+self.gamma*dift1*(1-dones))
             dif = []
-
             for i in range(2):
-               dif1a = tf.math.square(q[i]-qvt[i])
-               #dif1b = tf.math.square(qt[i]+tf.clip_by_value(q[i]-qt[i],-0.2,0.2)-qvt[i])
-               #dif.append(tf.maximum(dif1a,dif1b))
-               dif.append(dif1a)
-
-            lossq = tf.reduce_mean(dif[0]+dif[1])
-
-
+                dif1a = tf.math.square(q[i]-qvt)
+                dif1b = tf.math.square(qt[i]+tf.clip_by_value(q[i]-qt[i],-self.border,self.border)-qvt)
+                dif.append(tf.reduce_mean(tf.maximum(dif1a,dif1b)))
+                #dif.append(tf.reduce_mean(dif1a))
+            lossq = tf.reduce_mean(tf.convert_to_tensor(dif,tf.float32))
             trainable_varsa = self.modelq[0].trainable_variables+self.modelq[1].trainable_variables
-            #lossw = tf.convert_to_tensor(tf.reduce_mean(tf.math.square(trainable_varsa[0])))
-            #lossw = tf.reduce_mean(lossw)
-            lossq = lossq # + lossw
+            lossw = 0.0
+            for i in range(2):
+
+                ind = tf.cast(win[i][0]*(self.T-self.size_w), tf.int32)
+
+                mindex = self.tfindex+ind
+
+
+                wal = tf.gather(win[i][2], indices=mindex, axis=1, batch_dims=1)
+                lossw = lossw + tf.reduce_mean(tf.square(win[i][1] - wal))
+
+            lossq = lossq  + lossw*0.1
 
         gradsa = tape1.gradient(lossq, trainable_varsa)
 
         #divkb = tf.convert_to_tensor([tf.reduce_max(tf.math.abs(grad)) for grad in gradsa])
         #divkb = tf.reduce_max(divkb)
-        #if(divkb>9e-3):
-        #    gradsa = [grad*0.1 for grad in gradsa]
-        #else:
-        #    gradsa = [grad for grad in gradsa]
+        gradsa = [grad*self.alpha for grad in gradsa]
 
 
 
@@ -418,61 +469,72 @@ class sac:
             qv = []
 
             for i in range(2):
-                qv.append(self.modelq[i](inp1, training = True))
+                qv.append(self.modelq[i](inp1, training = True)[0])
 
             y_pii = self.modelp(inp1, training = True)
-            #y_piim = self.modelmp(inp1, training = True)
             y_pii = tf.clip_by_value(y_pii,1e-15,0.99999999999999)
 
-            #rst1 = tf.reduce_mean(tf.reduce_sum(y_piim[0]*tf.math.log(y_piim[0]/y_pii[0]), axis=-1))
-            #rst2 = tf.reduce_mean(tf.reduce_sum(y_piim[1]*tf.math.log(y_piim[1]/y_pii[1]), axis=-1))
+            pol = self.modelmp(inp1, training = True)
+            pol = tf.clip_by_value(pol,1e-15,0.99999999999999)
+            logpol = tf.math.log(pol)
 
 
             logpi = tf.math.log(y_pii)
-            entr = - tf.reduce_mean(tf.reduce_sum(y_pii[0]*logpi[0], axis=-1))
-            #divkb = tf.reduce_mean(tf.reduce_sum(y_pii[0]*(logpi[0]-logpi[1]) + y_pii[1]*(logpi[1]-logpi[0]), axis=-1))
+            entr = - tf.reduce_mean(tf.reduce_sum(y_pii*logpi, axis=-1))
 
-            #ypi_border1 = tf.reduce_mean(tf.math.exp(-y_pii[0]/0.00005))
-            #ypi_border2 = tf.reduce_mean(tf.math.exp(-y_pii[1]/0.00008))
+            minq = tf.minimum(qv[0], qv[1])
 
-            #ypi_border1 = tf.reduce_mean(tf.nn.relu(0.00005-y_pii[0]))*1000
-            #ypi_border2 = tf.reduce_mean(tf.nn.relu(0.00007-y_pii[1]))*1000
+            diflm1 = tf.reduce_mean(tf.reduce_sum(y_pii*(tf.stop_gradient(self.alphav)*logpi - minq),axis=-1))
+            divkb = tf.reduce_mean(tf.reduce_sum(y_pii*(logpi-logpol), axis = -1))
 
-
-            minq1 = tf.minimum(qv[0], qv[1])
-
-            diflm1 = tf.reduce_sum(y_pii[0]*(tf.stop_gradient(self.alphav)*logpi[0] - minq1),axis=-1)
-            diflm2 = tf.reduce_sum(y_pii[1]*(tf.stop_gradient(self.alphav)*logpi[1] - minq1),axis=-1)
-
-            #dst = tf.reduce_mean(tf.math.abs(y_pii1[0] - y_pii1[1]))*0.001
-
-            dm = tf.reduce_mean(diflm1+diflm2) #+ tf.math.exp(-divkb/0.0005)
-            lossp = dm  #+ ypi_border1#+ tf.nn.relu(rst1-0.2)+tf.nn.relu(rst2-0.2)#+ (la2c1+la2c2)*0.001#+ tf.square(0.01-dify)*1000.0#+kb*0.0001 #+ tf.nn.relu(self.entrmax*0.01-entr)*10 #+ corrdisp*maxq*0.05 #+ tf.reduce_mean(val)*maxq*0.02 #+ tf.reduce_mean(entr)*maxq*0.0005
+            dm =  diflm1  + divkb
+            lossp = dm
 
             trainable_vars2 = self.modelp.trainable_variables
-            #lossw = tf.convert_to_tensor(tf.reduce_mean(tf.math.square(trainable_vars2[0])) )
-            #lossw = tf.reduce_mean(lossw)
-            lossp = lossp  #+ 0.5*lossw
+            lossp = lossp
 
 
         grads2 = tape2.gradient(lossp, trainable_vars2)
-
-        self.optimizer2.apply_gradients(zip(grads2, trainable_vars2))
-
-        return  lossp, 0.0, entr
+        gradsa = [grad*self.alpha for grad in grads2]
+        self.optimizer2.apply_gradients(zip(gradsa, trainable_vars2))
 
 
+        return  lossp, divkb , entr
 
 
 
     @tf.function
+    def alpha_train(self, inp1):
+        with tf.GradientTape() as tape3:
+            y_pii = self.modelp(inp1, training = True)
+            y_pii = tf.clip_by_value(y_pii,1e-15,0.99999999999999)
+            logpi = tf.math.log(y_pii)
+            H = tf.reduce_sum(y_pii*logpi,axis=-1)
+            valH = H-tf.math.log(0.111111111)*0.995
+            lossa = - self.alphav*valH + tf.nn.relu(1e-3-self.alphav)*100.0
+        grads3 = tape3.gradient(lossa, [self.alphav])
+        self.optimizer3.apply_gradients(zip(grads3, [self.alphav]))
+
+
+    @tf.function
     def target_train(self):
-        tau = [0.005,0.0050, 0.005]
+        tau = [0.006,0.005, 0.005]
         for i in range(2):
             target_weights = self.targetq[i].trainable_variables
             weights = self.modelq[i].trainable_variables
             for (a, b) in zip(target_weights, weights):
                 a.assign(a * (1-tau[i]) + b*tau[i])
+
+        return
+
+    @tf.function
+    def target_train1(self):
+
+        for i in range(2):
+            target_weights = self.targetq[i].trainable_variables
+            weights = self.modelq[i].trainable_variables
+            for (a, b) in zip(target_weights, weights):
+                a.assign(b)
         return
 
     @tf.function
@@ -510,6 +572,7 @@ class sac:
 
 
 
+
     def learn_all(self):
         if self.flag_buf:
             max_count = self.n_buffer
@@ -524,16 +587,20 @@ class sac:
         acts = tf.cast(self.acts[indices] ,tf.int32)
         rews = tf.cast(self.rews[indices] ,tf.float32)
         dones = tf.cast(self.dones[indices] ,tf.float32)
+        pol = tf.cast(self.policies[indices] ,tf.float32)
 
 
         self.num = int(not bool(self.num))
 
-        lossq = self.train_q1(inp,inp_next,acts, rews, dones)
-        lossp, qv, qvt = self.train_actor1(inp)
+        lossq = self.train_q1(inp,inp_next,acts, rews, dones, pol)
 
+        lossp, qv, qvt = 0.0, 0.0, 0.0
+        if next(self.step_s()):
+            lossp, qv, qvt = self.train_actor1(inp)
 
 
         #time.sleep(0.05)
+
         self.target_train()
         return lossq, lossp, qv, qvt
 
@@ -581,9 +648,11 @@ class sac:
 
                 if self.cur_reward100 > self.max_reward:
                     self.max_reward = self.cur_reward100
+
                 #inum = int(self.nrewards*random.random()*0.9999)
                 inum = self.max_rewards.argmin()
                 mean = self.max_rewards.max()
+
 
 
                 #self.alphav = tf.Variable(0.003+self.cur_reward100*0.0005)
@@ -597,8 +666,13 @@ class sac:
 
                 self.max_nets[inum][3].set_weights(self.modelq[0].get_weights())
                 self.max_nets[inum][4].set_weights(self.modelq[1].get_weights())
+                maxnum = self.max_rewards.argmax()
+                self.maxtarg.set_weights(self.max_nets[maxnum][3+int(1.9999*random.random())].get_weights())
 
-
+                mean = self.max_rewards.max()
+                self.alpha = tf.Variable(1.2*((mean*0.002+1.0)))
+                self.alphav = tf.Variable(0.02*((mean*0.002+1.0)))
+                self.border = tf.Variable(0.2/((mean*0.002+1.0)))
 
 
                 val = numpy.arange(self.nrewards)
@@ -628,15 +702,20 @@ class sac:
             #else:
             #    vali = self.index
             #self.alphav = tf.Variable(vali*1.5e-9+0.001)
+
+            x  = self.modelp.get_weights()
+
+
             lossq, lossp, qv, qvt = self.learn_all()
-            if(random.random()>0.99):
+            self.modelmp.set_weights(x)
+            self.qv = 0.9*self.qv + 0.1*numpy.abs(qv)
+
+            if(random.random()>0.9):
                 self.fl_mod = not self.fl_mod
 
 
-
-
             if(self.index%4000==0 and self.buf_index>self.T):
-                print(f"index {self.index} {self.alphav.numpy():.{2}e} maxrew {self.max_rewards} lossq {lossq:.{2}e}  lossp {lossp:.{2}e} qv {qv:.{2}e}  qvt {qvt:.{2}e} acts {self.policies[self.buf_index-1:self.buf_index]} rew {self.cur_reward100:.{3}f} ")
+                print(f"index {self.index} {self.alphav.numpy():.{2}e} maxrew {self.max_rewards} lossq {lossq:.{2}e}  lossp {lossp:.{2}e} alph {self.border.numpy():.{2}e}  qvt {qv:.{2}e} acts {self.policies[self.buf_index-1:self.buf_index]} rew {self.cur_reward100:.{3}f} ")
                 self.cur_reward = 0
 
                 self.show()
