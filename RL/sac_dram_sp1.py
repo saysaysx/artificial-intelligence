@@ -228,7 +228,7 @@ class sac:
 
 
 
-        self.size_w = 32
+        self.size_w = 8
 
 
 
@@ -237,7 +237,7 @@ class sac:
         print(tf.shape(self.tfindex))
 
 
-        layo, val = CropLayer(32)(layres)
+        layo, val = CropLayer(self.size_w)(layres)
 
         lay = Dense(400, activation = 'linear') (layo)
         lay = Dense(350, activation = 'relu') (lay)
@@ -429,9 +429,9 @@ class sac:
             dif = []
             for i in range(2):
                 dif1a = tf.math.square(q[i]-qvt)
-                dif1b = tf.math.square(qt[i]+tf.clip_by_value(q[i]-qt[i],-self.border,self.border)-qvt)
-                dif.append(tf.reduce_mean(tf.maximum(dif1a,dif1b)))
-                #dif.append(tf.reduce_mean(dif1a))
+                #dif1b = tf.math.square(qt[i]+tf.clip_by_value(q[i]-qt[i],-self.border,self.border)-qvt)
+                #dif.append(tf.reduce_mean(tf.maximum(dif1a,dif1b)))
+                dif.append(tf.reduce_mean(dif1a))
             lossq = tf.reduce_mean(tf.convert_to_tensor(dif,tf.float32))
             trainable_varsa = self.modelq[0].trainable_variables+self.modelq[1].trainable_variables
             lossw = 0.0
@@ -487,8 +487,12 @@ class sac:
             diflm1 = tf.reduce_mean(tf.reduce_sum(y_pii*(tf.stop_gradient(self.alphav)*logpi - minq),axis=-1))
             divkb = tf.reduce_mean(tf.reduce_sum(y_pii*(logpi-logpol), axis = -1))
 
-            lossp = diflm1
+            dm =  diflm1
+            lossp = dm
+
             trainable_vars2 = self.modelp.trainable_variables
+            lossp = lossp
+
 
         grads2 = tape2.gradient(lossp, trainable_vars2)
         gradsa = [grad*self.alpha for grad in grads2]
