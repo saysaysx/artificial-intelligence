@@ -462,7 +462,7 @@ class sac:
 
 
     @tf.function
-    def train_actor1(self, inp):
+    def train_actor1(self, inp, pol):
         with tf.GradientTape() as tape2:
             inp1 = inp
 
@@ -471,13 +471,8 @@ class sac:
             for i in range(2):
                 qv.append(self.modelq[i](inp1, training = True)[0])
 
-            y_pii = self.modelp(inp1, training = True)
+            y_pii = (self.modelp(inp1, training = True)*0.1 + pol*0.9)
             y_pii = tf.clip_by_value(y_pii,1e-15,0.99999999999999)
-
-            pol = self.modelmp(inp1, training = True)
-            pol = tf.clip_by_value(pol,1e-15,0.99999999999999)
-            logpol = tf.math.log(pol)
-
 
             logpi = tf.math.log(y_pii)
             entr = - tf.reduce_mean(tf.reduce_sum(y_pii*logpi, axis=-1))
@@ -485,7 +480,7 @@ class sac:
             minq = tf.minimum(qv[0], qv[1])
 
             diflm1 = tf.reduce_mean(tf.reduce_sum(y_pii*(tf.stop_gradient(self.alphav)*logpi - minq),axis=-1))
-            divkb = tf.reduce_mean(tf.reduce_sum(y_pii*(logpi-logpol), axis = -1))
+
 
             dm =  diflm1
             lossp = dm
@@ -499,7 +494,7 @@ class sac:
         self.optimizer2.apply_gradients(zip(gradsa, trainable_vars2))
 
 
-        return  lossp, divkb , entr
+        return  lossp, entr , entr
 
 
 
@@ -596,7 +591,7 @@ class sac:
 
         lossp, qv, qvt = 0.0, 0.0, 0.0
         if next(self.step_s()):
-            lossp, qv, qvt = self.train_actor1(inp)
+            lossp, qv, qvt = self.train_actor1(inp, pol)
 
 
         #time.sleep(0.05)

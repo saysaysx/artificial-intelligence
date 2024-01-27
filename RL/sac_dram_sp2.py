@@ -306,47 +306,33 @@ class sac:
             inp_next1 = inp_next
             qv = []
             targ = []
-            tqv = []
-
             for i in range(2):
                 qvl = self.modelq[i](inp1, training = True)
-
                 qv.append(qvl)
-
                 val = self.targetq[i](inp_next1, training = True)
                 targ.append(val)
-                tqv.append(self.targetq[i](inp1, training = True))
 
             y_pi = pol
 
             y_pi = tf.clip_by_value(y_pi,1e-15,0.99999999999999999)
             logpi = tf.math.log(y_pi)
-
             q = []
-            qt = []
-
-
             for i in range(2):
                 q.append(tf.gather_nd(batch_dims=1,params = qv[i],indices  = actn))
-                qt.append( tf.gather_nd(batch_dims=1,params = tqv[i],indices  = actn))
+
             minq = tf.minimum(targ[0] , targ[1])
             dift1 = tf.reduce_sum((minq-tf.stop_gradient(self.alphav)*logpi)*y_pi, axis=-1)
             qvt = tf.stop_gradient(rew+self.gamma*dift1*(1-dones))
             dif = []
             for i in range(2):
                 dif1a = tf.math.square(q[i]-qvt)
-                dif1b = tf.math.square(qt[i]+tf.clip_by_value(q[i]-qt[i],-self.border,self.border)-qvt)
-                dif.append(tf.reduce_mean(tf.maximum(dif1a,dif1b)))
-                #dif.append(tf.reduce_mean(dif1a))
+                dif.append(tf.reduce_mean(dif1a))
 
             lossq = tf.reduce_mean(tf.convert_to_tensor(dif,tf.float32))
             trainable_varsa = self.modelq[0].trainable_variables+self.modelq[1].trainable_variables
 
-
         gradsa = tape1.gradient(lossq, trainable_varsa)
-
         gradsa = [grad*self.alpha for grad in gradsa]
-
 
         self.optimizer1.apply_gradients(zip(gradsa, trainable_varsa))
         return lossq
@@ -355,35 +341,25 @@ class sac:
 
 
     @tf.function
-    def train_actor1(self, inp):
+    def train_actor1(self, inp, pol):
         with tf.GradientTape() as tape2:
             inp1 = inp
-
             qv = []
-
             for i in range(2):
                 qv.append(self.modelq[i](inp1, training = True)[0])
-
-            y_pii = self.modelp(inp1, training = True)
+            y_pii = (self.modelp(inp1, training = True) + pol)*0.5
             y_pii = tf.clip_by_value(y_pii,1e-15,0.99999999999999)
-
             logpi = tf.math.log(y_pii)
             entr = - tf.reduce_mean(tf.reduce_sum(y_pii*logpi, axis=-1))
-
             minq = tf.minimum(qv[0], qv[1])
-
             diflm1 = tf.reduce_mean(tf.reduce_sum(y_pii*(tf.stop_gradient(self.alphav)*logpi - minq),axis=-1))
             lossp = diflm1
 
             trainable_vars2 = self.modelp.trainable_variables
 
-
-
         grads2 = tape2.gradient(lossp, trainable_vars2)
         gradsa = [grad*self.alpha for grad in grads2]
         self.optimizer2.apply_gradients(zip(gradsa, trainable_vars2))
-
-
         return  lossp, entr , entr
 
 
@@ -395,7 +371,6 @@ class sac:
             weights = self.modelq[i].trainable_variables
             for (a, b) in zip(target_weights, weights):
                 a.assign(a * (1-tau[i]) + b*tau[i])
-
         return
 
 
@@ -415,14 +390,11 @@ class sac:
         dones = tf.cast(self.dones[indices] ,tf.float32)
         pol = tf.cast(self.policies[indices] ,tf.float32)
 
-
-
-
         lossq = self.train_q1(inp,inp_next,acts, rews, dones, pol)
 
         lossp, qv, qvt = 0.0, 0.0, 0.0
         if next(self.step_s()):
-            lossp, qv, qvt = self.train_actor1(inp)
+            lossp, qv, qvt = self.train_actor1(inp, pol)
 
 
         #time.sleep(0.05)
