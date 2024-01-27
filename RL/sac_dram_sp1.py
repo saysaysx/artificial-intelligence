@@ -244,7 +244,7 @@ class sac:
         lay = Dense(300, activation = 'relu') (lay)
         lay = Dense(350, activation = 'relu') (lay)
         layv1 = Dense(self.len_act, activation = 'silu') (lay)
-        layv2 = Dense(self.size_w, activation = 'silu') (lay)
+        layv2 = Dense(self.size_w, activation = 'linear') (lay)
 
 
         self.nnets = 3
