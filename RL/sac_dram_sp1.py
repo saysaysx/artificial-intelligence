@@ -228,7 +228,7 @@ class sac:
 
 
 
-        self.size_w = 8
+        self.size_w = 16
 
 
 
@@ -239,12 +239,13 @@ class sac:
 
         layo, val = CropLayer(self.size_w)(layres)
 
-        lay = Dense(400, activation = 'linear') (layo)
-        lay = Dense(350, activation = 'relu') (lay)
-        lay = Dense(300, activation = 'relu') (lay)
-        lay = Dense(350, activation = 'relu') (lay)
+        lay = Dense(600, activation = 'linear') (layo)
+        lay = Dense(650, activation = 'relu') (lay)
+        lay = Dense(650, activation = 'relu') (lay)
+        lay = Dense(650, activation = 'relu') (lay)
         layv1 = Dense(self.len_act, activation = 'silu') (lay)
         layv2 = Dense(self.size_w, activation = 'linear') (lay)
+
 
 
         self.nnets = 3
@@ -411,7 +412,7 @@ class sac:
                 tqv.append(self.targetq[i](inp1, training = True)[0])
 
 
-            y_pi = pol#self.modelp(inp_next1, training = True)
+            y_pi = (pol*0.9+self.modelp(inp_next1, training = True)*0.1)
 
             y_pi = tf.clip_by_value(y_pi,1e-15,0.99999999999999999)
             logpi = tf.math.log(y_pi)
@@ -436,16 +437,19 @@ class sac:
             trainable_varsa = self.modelq[0].trainable_variables+self.modelq[1].trainable_variables
             lossw = 0.0
             for i in range(2):
+                #tf.print(tf.shape(win[i][0][:,0]))
 
                 ind = tf.cast(win[i][0]*(self.T-self.size_w), tf.int32)
+                mindex1 = self.tfindex+ind
 
-                mindex = self.tfindex+ind
 
 
-                wal = tf.gather(win[i][2], indices=mindex, axis=1, batch_dims=1)
-                lossw = lossw + tf.reduce_mean(tf.square(win[i][1] - wal))
+                wal1 = tf.gather(win[i][2], indices=mindex1, axis=1, batch_dims=1)
 
-            lossq = lossq  + lossw*0.1
+
+                lossw = lossw + tf.reduce_mean(tf.square(win[i][1] - wal1))
+
+            lossq = lossq  + lossw*0.01
 
         gradsa = tape1.gradient(lossq, trainable_varsa)
 
