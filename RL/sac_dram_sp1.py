@@ -395,24 +395,23 @@ class sac:
     @tf.function
     def train_q1(self, inp, inp_next, actn, rew, dones, pol):
         with tf.GradientTape(persistent=True) as tape1:
-            inp1 = inp
-            inp_next1 = inp_next
+
             qv = []
             targ = []
             tqv = []
             #targmax = self.maxtarg(inp_next1, training = True )
             win = []
             for i in range(2):
-                qvl = self.modelq[i](inp1, training = True)
+                qvl = self.modelq[i](inp, training = True)
 
                 qv.append(qvl[0])
                 win.append((qvl[1],qvl[2], qvl[3]))
-                val = self.targetq[i](inp_next1, training = True)[0]
+                val = self.targetq[i](inp_next, training = True)[0]
                 targ.append(val)
-                tqv.append(self.targetq[i](inp1, training = True)[0])
+                tqv.append(self.targetq[i](inp, training = True)[0])
 
 
-            y_pi = (pol*0.9+self.modelp(inp_next1, training = True)*0.1)
+            y_pi =self.modelp(inp_next, training = True)
 
             y_pi = tf.clip_by_value(y_pi,1e-15,0.99999999999999999)
             logpi = tf.math.log(y_pi)
@@ -466,14 +465,13 @@ class sac:
     @tf.function
     def train_actor1(self, inp, pol):
         with tf.GradientTape() as tape2:
-            inp1 = inp
 
             qv = []
 
             for i in range(2):
-                qv.append(self.modelq[i](inp1, training = True)[0])
+                qv.append(self.modelq[i](inp, training = True)[0])
 
-            y_pii = (self.modelp(inp1, training = True)*0.1 + pol*0.9)
+            y_pii = (self.modelp(inp, training = True)*0.4 + pol*0.6)
             y_pii = tf.clip_by_value(y_pii,1e-15,0.99999999999999)
 
             logpi = tf.math.log(y_pii)
