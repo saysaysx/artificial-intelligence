@@ -419,8 +419,6 @@ class sac:
 
             q = []
             qt = []
-
-
             for i in range(2):
                 q.append(tf.gather_nd(batch_dims=1,params = qv[i],indices  = actn))
                 qt.append( tf.gather_nd(batch_dims=1,params = tqv[i],indices  = actn))
