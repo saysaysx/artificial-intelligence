@@ -107,6 +107,8 @@ class environment():
 
         self.reward = self.reward+reward
         self.index = self.index + 1
+        if self.index>10000:
+            done = True
 
 
         return self.state(), reward, done
@@ -245,8 +247,8 @@ class sac:
         self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.00025)
         self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.000002)
 
-        self.alphav = tf.Variable(0.02)
-        self.border = tf.Variable(0.3)
+        self.alphav = tf.Variable(0.01)
+        self.border = tf.Variable(0.15)
 
 
         self.cur_reward = 0.0
@@ -289,42 +291,51 @@ class sac:
         out = self.get_net_res(numpy.array([l_state]))
         out1 = out[0].numpy()
 
-        fl = out1 < 0.0001
-        if(fl.any() and random.random()>0.9):
-            index = int(self.len_act*random.random()*0.99999)
-        else:
-            index = numpy.random.choice(self.len_act, 1, p = out1) [0]
+        #fl = out1 < 0.0001
+        #if(fl.any() and random.random()>0.5):
+        #    index = int(self.len_act*random.random()*0.99999)
+        #else:
+        index = numpy.random.choice(self.len_act, 1, p = out1) [0]
 
         return index, out1
 
 
-
+    # try rew + g*(1-down)*q() + H(s), opposite to rew + g*(1-down)*(q()+H(s_next))
     @tf.function
     def train_q1(self, inp, inp_next, actn, rew, dones, pol):
         with tf.GradientTape(persistent=True) as tape1:
-            qv = []
-            targ = []
+            qv, targ, tqv  = [], [], []
+
             for i in range(2):
                 qvl = self.modelq[i](inp, training = True)
                 qv.append(qvl)
                 val = self.targetq[i](inp_next, training = True)
                 targ.append(val)
+                tqv.append(self.targetq[i](inp, training = True))
 
             y_pi = self.modelp(inp_next, training = True)
+            y_pi = tf.clip_by_value(y_pi,1e-15,1.0)
 
-            y_pi = tf.clip_by_value(y_pi,1e-15,0.99999999999999999)
-            logpi = tf.math.log(y_pi)
-            q = []
+
+            pol = tf.clip_by_value(pol,1e-15,1.0)
+            logpol = tf.math.log(pol)
+            q, qt = [], []
             for i in range(2):
                 q.append(tf.gather_nd(batch_dims=1,params = qv[i],indices  = actn))
+                qt.append( tf.gather_nd(batch_dims=1,params = tqv[i],indices  = actn))
 
             minq = tf.minimum(targ[0] , targ[1])
-            dift1 = tf.reduce_sum((minq-tf.stop_gradient(self.alphav)*logpi)*y_pi, axis=-1)
-            qvt = tf.stop_gradient(rew+self.gamma*dift1*(1-dones))
+            nentr = tf.reduce_sum(tf.stop_gradient(self.alphav)*logpol*pol, axis = -1)
+
+            dift1 = tf.reduce_sum(minq*y_pi, axis=-1)
+            qvt = tf.stop_gradient(rew+self.gamma*dift1*(1-dones)-nentr)
             dif = []
             for i in range(2):
                 dif1a = tf.math.square(q[i]-qvt)
-                dif.append(tf.reduce_mean(dif1a))
+                dif1b = tf.math.square(qt[i]+tf.clip_by_value(q[i]-qt[i],-self.border,self.border)-qvt)
+                dif.append(tf.reduce_mean(tf.maximum(dif1a,dif1b)))
+
+
 
             lossq = tf.reduce_mean(tf.convert_to_tensor(dif,tf.float32))
             trainable_varsa = self.modelq[0].trainable_variables+self.modelq[1].trainable_variables
@@ -344,9 +355,9 @@ class sac:
 
             qv = []
             for i in range(2):
-                qv.append(self.modelq[i](inp, training = True)[0])
-            y_pii = (self.modelp(inp, training = True) + pol)*0.5
-            y_pii = tf.clip_by_value(y_pii,1e-15,0.99999999999999)
+                qv.append(self.modelq[i](inp, training = True))
+            y_pii = self.modelp(inp, training = True)
+            y_pii = tf.clip_by_value(y_pii,1e-15,1.0)
             logpi = tf.math.log(y_pii)
             entr = - tf.reduce_mean(tf.reduce_sum(y_pii*logpi, axis=-1))
             minq = tf.minimum(qv[0], qv[1])
@@ -460,9 +471,9 @@ class sac:
 
 
                 mean = self.max_rewards.max()
-                self.alpha = tf.Variable(1.2*((mean*0.002+1.0)))
-                self.alphav = tf.Variable(0.02*((mean*0.002+1.0)))
-                self.border = tf.Variable(0.2/((mean*0.002+1.0)))
+                #self.alpha = tf.Variable(1.2/((mean*0.02+1.0)))
+                #self.alphav = tf.Variable(0.02*((mean*0.002+1.0)))
+                #self.border = tf.Variable(0.2/((mean*0.002+1.0)))
 
         if self.flag:
             self.show()
@@ -473,7 +484,7 @@ class sac:
 
 
             if(self.index%4000==0 and self.buf_index>self.T):
-                print(f"index {self.index} {self.alphav.numpy():.{2}e} maxrew {self.max_rewards} lossq {lossq:.{2}e}  lossp {lossp:.{2}e} alph {self.border.numpy():.{2}e}  qvt {qv:.{2}e} acts {self.policies[self.buf_index-1:self.buf_index]} rew {self.cur_reward100:.{3}f} ")
+                print(f"index {self.index} {self.alphav.numpy():.{2}e} maxrew {self.max_rewards} lossq {lossq:.{2}e}  lossp {lossp:.{2}e} alph {self.alpha.numpy():.{2}e}  qvt {qv:.{2}e} acts {self.policies[self.buf_index-1:self.buf_index]} rew {self.cur_reward100:.{3}f} ")
                 self.cur_reward = 0
 
                 self.show()
