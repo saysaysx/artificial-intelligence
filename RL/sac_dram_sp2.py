@@ -320,15 +320,17 @@ class sac:
             pol = tf.clip_by_value(pol,1e-15,1.0)
             logpol = tf.math.log(pol)
             q, qt = [], []
+
             for i in range(2):
                 q.append(tf.gather_nd(batch_dims=1,params = qv[i],indices  = actn))
                 qt.append( tf.gather_nd(batch_dims=1,params = tqv[i],indices  = actn))
-
+            pola = tf.gather_nd(batch_dims=1,params = pol,indices  = actn)
             minq = tf.minimum(targ[0] , targ[1])
             nentr = tf.reduce_sum(tf.stop_gradient(self.alphav)*logpol*pol, axis = -1)
+            penalty  = tf.nn.relu(1e-4-pola)*10000
 
             dift1 = tf.reduce_sum(minq*y_pi, axis=-1)
-            qvt = tf.stop_gradient(rew+self.gamma*dift1*(1-dones)-nentr)
+            qvt = tf.stop_gradient(rew+self.gamma*dift1*(1-dones)-nentr-penalty)
             dif = []
             for i in range(2):
                 dif1a = tf.math.square(q[i]-qvt)
@@ -361,7 +363,8 @@ class sac:
             logpi = tf.math.log(y_pii)
             entr = - tf.reduce_mean(tf.reduce_sum(y_pii*logpi, axis=-1))
             minq = tf.minimum(qv[0], qv[1])
-            diflm1 = tf.reduce_mean(tf.reduce_sum(y_pii*(tf.stop_gradient(self.alphav)*logpi - minq),axis=-1))
+            penalty  = tf.nn.relu(1e-4-y_pii)*10000
+            diflm1 = tf.reduce_mean(tf.reduce_sum(y_pii*(tf.stop_gradient(self.alphav)*logpi+penalty - minq),axis=-1))
             lossp = diflm1
 
             trainable_vars2 = self.modelp.trainable_variables
