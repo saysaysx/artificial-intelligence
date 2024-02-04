@@ -366,7 +366,7 @@ class sac:
 
             x = tf.one_hot(tf.squeeze(actn), depth=self.len_act)
             rel = y_pii/pol
-            rel = tf.clip_by_value(rel, 0.1,1.1) * x
+            rel = tf.clip_by_value(rel, 0.1,1.9) * x
             y_pii = pol*(1.0-x) + pol*rel
             y_pii = y_pii/ tf.reduce_sum(y_pii,axis=-1)[:,None]
 
