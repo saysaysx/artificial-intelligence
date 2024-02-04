@@ -168,6 +168,7 @@ class sac:
         self.n_buffer = 80000
         self.buf_index  = 0
         self.flag_buf = False
+        self.indT = tf.range(self.T)
 
 
 
@@ -248,7 +249,7 @@ class sac:
         self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.000002)
 
         self.alphav = tf.Variable(0.01)
-        self.border = tf.Variable(0.15)
+        self.border = tf.Variable(0.1)
 
 
         self.cur_reward = 0.0
@@ -314,23 +315,23 @@ class sac:
                 tqv.append(self.targetq[i](inp, training = True))
 
             y_pi = self.modelp(inp_next, training = True)
-            y_pi = tf.clip_by_value(y_pi,1e-15,1.0)
+            y_pi = tf.clip_by_value(y_pi,1e-20,1.0)
 
 
-            pol = tf.clip_by_value(pol,1e-15,1.0)
+            pol = tf.clip_by_value(pol,1e-20,1.0)
             logpol = tf.math.log(pol)
             q, qt = [], []
 
             for i in range(2):
                 q.append(tf.gather_nd(batch_dims=1,params = qv[i],indices  = actn))
                 qt.append( tf.gather_nd(batch_dims=1,params = tqv[i],indices  = actn))
-            pola = tf.gather_nd(batch_dims=1,params = pol,indices  = actn)
+            #pola = tf.gather_nd(batch_dims=1,params = pol,indices  = actn)
             minq = tf.minimum(targ[0] , targ[1])
             nentr = tf.reduce_sum(tf.stop_gradient(self.alphav)*logpol*pol, axis = -1)
-            penalty  = tf.nn.relu(1e-4-pola)*10000
+
 
             dift1 = tf.reduce_sum(minq*y_pi, axis=-1)
-            qvt = tf.stop_gradient(rew+self.gamma*dift1*(1-dones)-nentr-penalty)
+            qvt = tf.stop_gradient(rew+self.gamma*dift1*(1-dones)-nentr)
             dif = []
             for i in range(2):
                 dif1a = tf.math.square(q[i]-qvt)
@@ -352,19 +353,32 @@ class sac:
 
 
     @tf.function
-    def train_actor1(self, inp, pol):
+    def train_actor1(self, inp, pol, actn):
         with tf.GradientTape() as tape2:
 
-            qv = []
+            qv, qvt = [], []
             for i in range(2):
                 qv.append(self.modelq[i](inp, training = True))
+                #qvt.append(self.targetq[i](inp, training = True))
             y_pii = self.modelp(inp, training = True)
-            y_pii = tf.clip_by_value(y_pii,1e-15,1.0)
+            y_pii = tf.clip_by_value(y_pii,1e-10,1.0)
+            pol = tf.clip_by_value(pol,1e-10,1.0)
+
+            x = tf.one_hot(tf.squeeze(actn), depth=self.len_act)
+            rel = y_pii/pol
+            rel = tf.clip_by_value(rel, 0.1,1.1) * x
+            y_pii = pol*(1.0-x) + pol*rel
+            y_pii = y_pii/ tf.reduce_sum(y_pii,axis=-1)[:,None]
+
+
+
             logpi = tf.math.log(y_pii)
             entr = - tf.reduce_mean(tf.reduce_sum(y_pii*logpi, axis=-1))
             minq = tf.minimum(qv[0], qv[1])
-            penalty  = tf.nn.relu(1e-4-y_pii)*10000
-            diflm1 = tf.reduce_mean(tf.reduce_sum(y_pii*(tf.stop_gradient(self.alphav)*logpi+penalty - minq),axis=-1))
+            #targm  = tf.minimum(qvt[0], qvt[1])
+            #minq = targm+tf.clip_by_value(minq-targm,-self.border,self.border)
+
+            diflm1 = tf.reduce_mean(tf.reduce_sum(y_pii*(tf.stop_gradient(self.alphav)*logpi - minq),axis=-1))
             lossp = diflm1
 
             trainable_vars2 = self.modelp.trainable_variables
@@ -406,7 +420,7 @@ class sac:
 
         lossp, qv, qvt = 0.0, 0.0, 0.0
         if next(self.step_s()):
-            lossp, qv, qvt = self.train_actor1(inp, pol)
+            lossp, qv, qvt = self.train_actor1(inp, pol, acts)
 
 
         #time.sleep(0.05)
@@ -475,8 +489,8 @@ class sac:
 
                 mean = self.max_rewards.max()
                 #self.alpha = tf.Variable(1.2/((mean*0.02+1.0)))
-                #self.alphav = tf.Variable(0.02*((mean*0.002+1.0)))
-                #self.border = tf.Variable(0.2/((mean*0.002+1.0)))
+                #self.alphav = tf.Variable(0.01/((mean*0.02+1.0)))
+                #self.border = tf.Variable(0.15*((mean*0.05+1.0)))
 
         if self.flag:
             self.show()
@@ -487,7 +501,7 @@ class sac:
 
 
             if(self.index%4000==0 and self.buf_index>self.T):
-                print(f"index {self.index} {self.alphav.numpy():.{2}e} maxrew {self.max_rewards} lossq {lossq:.{2}e}  lossp {lossp:.{2}e} alph {self.alpha.numpy():.{2}e}  qvt {qv:.{2}e} acts {self.policies[self.buf_index-1:self.buf_index]} rew {self.cur_reward100:.{3}f} ")
+                print(f"index {self.index} {self.alphav.numpy():.{2}e} maxrew {self.max_rewards} lossq {lossq:.{2}e}  lossp {lossp:.{2}e} alph {self.alpha.numpy():.{2}e}  border {self.border.numpy():.{2}e} acts {self.policies[self.buf_index-1:self.buf_index]} rew {self.cur_reward100:.{3}f} ")
                 self.cur_reward = 0
 
                 self.show()
