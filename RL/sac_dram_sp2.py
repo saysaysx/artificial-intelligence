@@ -513,10 +513,10 @@ class sac:
                 self.show()
                 if(self.index%32000==0):
                     plt.plot(self.xindex,self.rewardy)
-                    plt.savefig("./out/figure_rew7.png")
+                    plt.savefig("./out/figure_rew8.png")
                     plt.close()
                     df = pandas.DataFrame({'x': self.xindex, 'y': self.rewardy})
-                    df.to_excel('./out/file_name7.xlsx', index=False)
+                    df.to_excel('./out/file_name8.xlsx', index=False)
 
 
         self.index = self.index+1
