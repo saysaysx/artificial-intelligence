@@ -364,21 +364,27 @@ class sac:
             y_pii = tf.clip_by_value(y_pii,1e-10,1.0)
             pol = tf.clip_by_value(pol,1e-10,1.0)
 
-            x = tf.one_hot(tf.squeeze(actn), depth=self.len_act)
+            #x = tf.one_hot(tf.squeeze(actn), depth=self.len_act)
             rel = y_pii/pol
-            rel = tf.clip_by_value(rel, 0.1,1.9) * x
-            y_pii = pol*(1.0-x) + pol*rel
-            y_pii = y_pii/ tf.reduce_sum(y_pii,axis=-1)[:,None]
-
-
-
+            rel = tf.clip_by_value(rel, 0.9,1.1)
+            #y_pii = pol*(1.0-x) + pol*rel
+            y_pii1 = rel*pol
+            y_pii1 = y_pii1/ tf.reduce_sum(y_pii1,axis=-1)[:,None]
             logpi = tf.math.log(y_pii)
+            logpi1 = tf.math.log(y_pii1)
             entr = - tf.reduce_mean(tf.reduce_sum(y_pii*logpi, axis=-1))
             minq = tf.minimum(qv[0], qv[1])
+
+            dif1 = y_pii*(tf.stop_gradient(self.alphav)*logpi - minq)
+            dif2 = y_pii1*(tf.stop_gradient(self.alphav)*logpi1 - minq)
+            dif = tf.reduce_sum(tf.maximum(dif1,dif2),axis=-1)
+
+
+
             #targm  = tf.minimum(qvt[0], qvt[1])
             #minq = targm+tf.clip_by_value(minq-targm,-self.border,self.border)
 
-            diflm1 = tf.reduce_mean(tf.reduce_sum(y_pii*(tf.stop_gradient(self.alphav)*logpi - minq),axis=-1))
+            diflm1 = tf.reduce_mean(dif)
             lossp = diflm1
 
             trainable_vars2 = self.modelp.trainable_variables
