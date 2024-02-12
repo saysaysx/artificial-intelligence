@@ -359,7 +359,7 @@ class sac:
             qv, qvt = [], []
             for i in range(2):
                 qv.append(self.modelq[i](inp, training = True))
-                #qvt.append(self.targetq[i](inp, training = True))
+                qvt.append(self.targetq[i](inp, training = True))
             y_pii = self.modelp(inp, training = True)
             y_pii = tf.clip_by_value(y_pii,1e-10,1.0)
             pol = tf.clip_by_value(pol,1e-10,1.0)
@@ -370,14 +370,19 @@ class sac:
             logpol = tf.math.log(pol)
             entr = - tf.reduce_mean(tf.reduce_sum(y_pii*logpi, axis=-1))
             minq = tf.minimum(qv[0], qv[1])
+            minqt = tf.minimum(qvt[0], qvt[1])
+
+
+
+
 
             dif1 = y_pii*(tf.stop_gradient(self.alphav)*logpi - minq)
-            dif2 = pol*(tf.stop_gradient(self.alphav)*logpol - minq)
-            rel = dif1-dif2
-            rel = tf.clip_by_value(rel,-1,1)
+            dif2 = pol*(tf.stop_gradient(self.alphav)*logpol - minqt)
+            dif = tf.square(dif1-dif2)
 
 
-            dif = tf.maximum(dif1,dif2+rel)
+
+            dif = dif1 + dif*0.1
 
 
 
