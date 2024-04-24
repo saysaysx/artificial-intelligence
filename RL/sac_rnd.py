@@ -346,6 +346,7 @@ class sac:
             difhash = tf.reduce_mean(tf.math.square(hash-rndhash))
 
             dift1 = tf.reduce_sum(minq*y_pi, axis=-1)
+            # anti exploration
             qvt = rew+self.gamma*dift1*(1-dones) - nentr - difhash
             dif = []
             for i in range(2):
@@ -392,7 +393,7 @@ class sac:
             qe = tf.clip_by_value(qe,1e-10,1.0)
             #logqe = tf.math.log(qe)
 
-
+            # difs of distributions
             dif1 = 1 - tf.math.sqrt(y_pii*qe)
 
 
