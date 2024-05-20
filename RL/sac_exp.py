@@ -1,3 +1,6 @@
+
+from ipywidgets import interact
+
 # MIT License
 # Copyright (c) 2023 saysaysx
 import random
@@ -24,7 +27,7 @@ print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
 gpus = tf.config.list_physical_devices('GPU')
 print("GPUs Available: ", gpus)
 
-tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
+#tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
 
 import tensorflow.keras as keras
 from tensorflow.keras.layers import Dense, Input, concatenate, BatchNormalization, Dropout, Conv2D, Reshape, Flatten
@@ -32,10 +35,12 @@ from tensorflow.keras.layers import MaxPooling1D, Permute, Conv1D, LSTM, LeakyRe
 from tensorflow.keras.layers import RepeatVector, Subtract, Embedding
 import tensorflow as tf
 from tensorflow.keras import regularizers
-import keras.backend as K
+import tensorflow.keras.backend as K
+
 
 numpy.set_printoptions(precision=4)
 
+print("Start gput opts")
 config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
 
@@ -149,10 +154,46 @@ class environment():
         return len(self.state())
 
 
+print("Start declare widgets")
+
+import ipywidgets as widgets
+from datetime import datetime
+
+from ipywidgets import Image
+from io import BytesIO
+buf = BytesIO()
+plt.savefig(buf, format='png')
+buf.seek(0)
+image_widget1 = Image(value=buf.getvalue(), format='png')
+#display(image_widget1)
+
+
+text_widget = widgets.Label(value="This is some text to display.")
+#display(text_widget)
+
+def plotv(x,y,im):
+
+    #plt.plot(x,y)
+    fig,ax = plt.subplots(1,2,figsize=(10,2))
+    ax[0].imshow(im)
+    ax[1].plot(x,y)
+
+
+    buf = BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+
+    plt.close()
+    image_widget1.value = buf.getvalue()
+
+print("Declare function plot")
+
 
 
 class sac:
     def __init__(self,env):
+        self.start_time = datetime.now()
+
         self.env = env
         self.index = 0
 
@@ -166,7 +207,7 @@ class sac:
 
 
         self.max_t = 10
-        self.start_time = time.time()
+
 
         self.T = 512
         self.n_buffer = 80000
@@ -174,18 +215,18 @@ class sac:
         self.flag_buf = False
         self.indT = tf.range(self.T)
 
-
+        print("Make bufs")
 
         self.rews = numpy.zeros((self.n_buffer,),dtype=numpy.float32)
         self.acts = numpy.zeros((self.n_buffer, 1),dtype=numpy.float32)
         self.policies = numpy.zeros((self.n_buffer, self.len_act),dtype=numpy.float32)
-        self.qval = numpy.zeros((self.n_buffer, self.len_act),dtype=numpy.float32)
         self.values = numpy.zeros((self.n_buffer,),dtype=numpy.float32)
         self.states = numpy.zeros((self.n_buffer, *self.shape_state),dtype=numpy.uint8)
         self.previous_states = numpy.zeros((self.n_buffer, *self.shape_state),dtype=numpy.uint8)
         self.dones = numpy.zeros((self.n_buffer,),dtype=numpy.float32)
         self.vars = [i for i in range(self.len_act)]
 
+        print("Start make networks")
         from keras.layers import Lambda
         from tensorflow.keras.utils import register_keras_serializable
         @register_keras_serializable()
@@ -206,7 +247,7 @@ class sac:
         lay = Dense(350, activation = 'relu') (lay)
         lay = Dense(250, activation = 'relu') (lay)
         lay = Dense(150, activation = 'relu') (lay)
-        lay = Dense(150, activation = 'relu') (lay)
+        lay = Dense(50, activation = 'relu') (lay)
         layv1 = Dense(self.len_act, activation = 'linear') (lay)
 
 
@@ -221,7 +262,16 @@ class sac:
 
         print("------------")
         print(self.shape_state)
-        self.step_s = steps(2)
+        self.step_s = steps(4)
+
+        @register_keras_serializable()
+        def scale(x):
+            y = x+5e-3
+            sumy = tf.reduce_sum(y,axis=-1)[:,None]
+            y = y/sumy
+            return y
+
+        sc = Lambda(scale)
 
         inp1 = Input(shape = self.shape_state, dtype='uint8' )
 
@@ -231,8 +281,11 @@ class sac:
         lay = Dense(350, activation = 'relu') (lay)
         lay = Dense(250, activation = 'relu') (lay)
         lay = Dense(150, activation = 'relu') (lay)
-        lay = Dense(150, activation = 'relu') (lay)
+        lay = Dense(50, activation = 'relu') (lay)
         layp1 = Dense(self.len_act, activation="softmax") (lay)
+        layp1 =  sc(layp1)
+
+
         self.modelp = keras.Model(inputs=inp1, outputs=layp1)
 
 
@@ -250,16 +303,16 @@ class sac:
         lay = resc(inp1)
 
 
-        self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.00025)
-        self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.00025)
-        self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.00025)
+        self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.0002)
+        self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.0002)
+        self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.0002)
         self.optimizer4 = tf.keras.optimizers.Adam(learning_rate=0.002)
 
-        self.alphav = tf.Variable(0.02)
+        self.alphav = tf.Variable(0.003)
         self.border = tf.Variable(0.1)
         self.std_rnd = tf.Variable(1.0)
         self.mean_rnd = tf.Variable(0.0)
-        self.bettav = tf.Variable(0.0)
+        self.bettav = tf.Variable(1.0)
 
         self.mean_crt = [tf.Variable(1.0), tf.Variable(1.0)]
         self.mean_act = tf.Variable(1.0)
@@ -294,9 +347,8 @@ class sac:
     def get_net_res(self,l_state):
         inp = l_state
         out = self.modelp(inp , training = False)
-        val = self.modelq[0](inp , training = False)
 
-        return out, val
+        return out
 
     @tf.function
     def get_value_res(self,l_state):
@@ -305,12 +357,11 @@ class sac:
         return val
 
     def get_net_act(self,l_state):
-        out, val = self.get_net_res(numpy.array([l_state]))
+        out = self.get_net_res(numpy.array([l_state]))
         out1 = out[0].numpy()
-        val1 = val[0].numpy()
         index = numpy.random.choice(self.len_act, 1, p = out1) [0]
 
-        return index, out1, val1
+        return index, out1
 
 
     # try rew + g*(1-down)*q() + H(s), opposite to rew + g*(1-down)*(q()+H(s_next))
@@ -324,47 +375,48 @@ class sac:
                 qv.append(qvl)
                 val = self.targetq[i](inp_next, training = True)
                 targ.append(val)
-                #tqv.append(self.targetq[i](inp, training = True))
+                tqv.append(self.targetq[i](inp, training = True))
 
-            y_pi = self.modelp(inp_next, training = True)
-            y_pii = self.modelp(inp, training = True)
-            y_pii = tf.clip_by_value(y_pii,1e-10,1.0)
-            log = tf.math.log(y_pi)
-
-            logpi = tf.math.log(y_pii)
-            pol = tf.clip_by_value(pol,1e-10,1.0)
+            #y_pi = self.modelp(inp_next, training = True)
+            #log = tf.math.log(y_pi)
+            #pol = tf.clip_by_value(pol,1e-10,1.0)
             logpol = tf.math.log(pol)
             q, qt = [], []
 
             for i in range(self.nnets):
                 q.append(tf.gather_nd(batch_dims=1,params = qv[i],indices  = actn))
-                #qt.append( tf.gather_nd(batch_dims=1,params = tqv[i],indices  = actn))
+                qt.append( tf.gather_nd(batch_dims=1,params = tqv[i],indices  = actn))
 
             minq  = tf.minimum(targ[0] , targ[1])
 
+            minq1 = minq/self.alphav
+            qe = tf.math.exp(minq1 - tf.reduce_max(minq1,axis=-1)[:,None])
+            qsum1 = tf.reduce_sum(qe,axis=-1)
+            qe = qe / qsum1[:,None]
+            qe = tf.clip_by_value(qe,1e-3,1.0)
+            log = tf.math.log(qe)
+
+            acts = tf.random.categorical(logpol,1)
+            acts1 = tf.random.categorical(log,1)
+
+            nentr = self.alphav*logpol
+            nentr = tf.gather_nd(batch_dims=1,params = nentr,indices  = acts)
+            #kl = y_pii*(logpi-logpol)
+
+            #minq1  = tf.reduce_sum(y_pi*minq,axis=-1)
+            minq1  = tf.gather_nd(batch_dims=1,params = minq,indices  = acts1)
 
 
-            nentr = self.alphav*logpi*y_pii
-            kl = y_pii*(logpi-logpol)
-
-            minq1  = tf.reduce_sum(y_pi*minq,axis=-1)
-            entr = tf.reduce_sum(nentr,axis=-1)
-            klg =  tf.reduce_sum(kl,axis=-1)
-            klg = tf.nn.relu(klg-0.1)
-            # anti exploration
-            qvt = rew +self.gamma*minq1*(1-dones) - entr - klg*0.1
-
-
+            qvt = tf.nn.softsign(rew) + self.gamma*minq1*(1-dones)  - nentr
 
             dif = []
             val = []
-            dif1a = tf.reduce_mean(tf.math.square(q[0]-qvt))
-            dif1b = tf.reduce_mean(tf.math.square(q[1]-qvt))
-
-
-            dif = [dif1a,dif1b]
-
-
+            dif = []
+            for i in range(2):
+                dif1a = tf.math.square(q[i]-qvt)
+                #dif1b = tf.math.square(qt[i]+tf.clip_by_value(q[i]-qt[i],-self.border,self.border)-qvt)
+                #dif.append(tf.reduce_mean(tf.maximum(dif1a,dif1b)))
+                dif.append(tf.reduce_mean(dif1a))
 
             lossq = tf.reduce_mean(tf.convert_to_tensor(dif,tf.float32))
             trainable_varsa = self.modelq[0].trainable_variables + self.modelq[1].trainable_variables
@@ -377,33 +429,37 @@ class sac:
     @tf.function
     def apply_grads(self):
         trainable_varsa = self.modelq[0].trainable_variables + self.modelq[1].trainable_variables
-        grads = [grad/2.0 for grad in self.grad_accum]
+        grads = [grad/4.0 for grad in self.grad_accum]
         self.optimizer1.apply_gradients(zip(grads, trainable_varsa))
         for acc in self.grad_accum:
             acc.assign(tf.zeros_like(acc))
 
 
-
-
-
     @tf.function
-    def train_actor1(self, inp, pol, val):
+    def train_actor1(self, inp, pol):
         with tf.GradientTape(persistent=True) as tape2:
 
             qv, qvt = [], []
             for i in range(self.nnets):
                 qv.append(self.modelq[i](inp, training = True))
-                qvt.append(val)
+                #qvt.append(self.targetq[i](inp, training = True))
             y_pii = self.modelp(inp, training = True)
-            y_pii = tf.clip_by_value(y_pii,1e-20,1.0)
             logpi = tf.math.log(y_pii)
 
             entr = - tf.reduce_mean(tf.reduce_sum(y_pii*logpi, axis=-1))
+            #minq = tf.minimum(qv[0],qv[1])
+            minq = (qv[0]+qv[1])*0.5
+            #minq1 = minq/self.alphav
+            #qe = tf.math.exp(minq1 - tf.reduce_max(minq1,axis=-1)[:,None])
+            #qsum1 = tf.reduce_sum(qe,axis=-1)
+            #qe = qe / qsum1[:,None] + 1e-9
+            #qsum1 = tf.stop_gradient(tf.reduce_sum(qe,axis=-1))
+            #qe = qe / qsum1[:,None]
+            #qe = qe*0.7+pol*0.3
 
+            #qelog = tf.math.log(qe)
 
-            minq = tf.minimum(qv[0],qv[1])
-
-            dif1 = tf.reduce_sum(y_pii*(logpi*self.alphav-minq),axis=-1)
+            dif1 = tf.reduce_sum(y_pii*(logpi*self.alphav-minq) ,axis=-1)
 
             lossp = tf.reduce_mean(dif1)
 
@@ -418,7 +474,7 @@ class sac:
 
     @tf.function
     def target_train(self):
-        tau = [0.006,0.006]
+        tau = [0.003,0.003]
         for i in range(self.nnets):
             target_weights = self.targetq[i].trainable_variables
             weights = self.modelq[i].trainable_variables
@@ -442,19 +498,19 @@ class sac:
         rews = tf.cast(self.rews[indices] ,tf.float32)
         dones = tf.cast(self.dones[indices] ,tf.float32)
         pol = tf.cast(self.policies[indices] ,tf.float32)
-        val = tf.cast(self.qval[indices] ,tf.float32)
+
 
         lossq = self.train_q1(inp,inp_next,acts, rews, dones, pol)
         if self.step_s():
             self.apply_grads()
 
-        lossp, entr, dif = self.train_actor1(inp, pol, val)
+        lossp, entr, dif = self.train_actor1(inp, pol)
         #time.sleep(0.01)
 
         self.target_train()
         return lossq, lossp, entr, dif
 
-    def add(self, reward,done,prev_state,state,act, pol, qval):
+    def add(self, reward,done,prev_state,state,act, pol):
         i = self.buf_index
         self.rews[i] = reward
         self.dones[i] = done
@@ -462,7 +518,6 @@ class sac:
         self.previous_states[i] = prev_state
         self.acts[i] = act
         self.policies[i] = pol
-        self.qval[i] = qval
         self.buf_index = self.buf_index+1
         if self.buf_index>=self.n_buffer:
             self.buf_index = 0
@@ -474,11 +529,11 @@ class sac:
     def step(self):
 
         prev_st  = self.env.state()
-        act, pol, val = self.get_net_act(prev_st)
+        act, pol = self.get_net_act(prev_st)
 
         state, reward, done  = self.env.get_state(act)
 
-        self.add(reward,done,prev_st,state,act, pol, val)
+        self.add(reward,done,prev_st,state,act, pol)
 
         self.cur_reward = self.cur_reward+reward
 
@@ -499,7 +554,7 @@ class sac:
 
                 if self.cur_reward100 > self.max_reward:
                     self.max_reward = self.cur_reward100
-                    self.bettav.assign(self.max_reward)
+
 
                 inum = self.max_rewards.argmin()
                 self.max_rewards[inum] = self.cur_reward100
@@ -514,28 +569,34 @@ class sac:
 
 
             if(self.index%4000==0 and self.buf_index>self.T):
-                print(f"index {self.index} {self.alphav.numpy():.{2}e} maxrew {self.max_rewards} lossq {lossq:.{2}e}  lossp {lossp:.{2}e} entr {entr:.{2}e}  dif {dif:.{2}e} acts {self.policies[self.buf_index-1:self.buf_index]} rew {self.cur_reward100:.{3}f} ")
+
+                inf_str = f"index {self.index} {self.alphav.numpy():.{2}e} maxrew {self.max_rewards} lossq {lossq:.{2}e}  lossp {lossp:.{2}e} entr {entr:.{2}e}  dif {dif:.{2}e} acts {self.policies[self.buf_index-1:self.buf_index]} rew {self.cur_reward100:.{3}f} "
+
+                timed = (datetime.now() - self.start_time).total_seconds()
+
+                #text_widget.value = inf_str +  f" time: {int(timed//3600)}:{int((timed%3600)//60)}"
+                #print(f"index {self.index} {self.alphav.numpy():.{2}e} maxrew {self.max_rewards} lossq {lossq:.{2}e}  lossp {lossp:.{2}e} entr {entr:.{2}e}  dif {dif:.{2}e} acts {self.policies[self.buf_index-1:self.buf_index]} rew {self.cur_reward100:.{3}f} ")
+                print(inf_str+f" time: {int(timed//3600)}:{int((timed%3600)//60)}")
                 self.cur_reward = 0
 
-                self.show()
+                #self.show()
                 if(self.index%32000==0):
                     plt.plot(self.xindex,self.rewardy)
                     plt.savefig("./out/figure_rew8.png")
                     plt.close()
                     df = pandas.DataFrame({'x': self.xindex, 'y': self.rewardy})
                     df.to_excel('./out/file_name8.xlsx', index=False)
+                    plotv(self.xindex,self.rewardy,self.env.get_image())
 
 
         self.index = self.index+1
         return
 
     def show(self):
-        #cv2.imshow(self.nwin,self.env.get_image())
-        #if cv2.waitKey(1)==27:
-        #    print("27")
-        #    self.flag = not self.flag
-        return
+        #frame = self.env.get_image()
+        #plt.imshow(frame)
 
+        return
 
 env = environment()
 sac1 = sac(env)
