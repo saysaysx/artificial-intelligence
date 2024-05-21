@@ -380,7 +380,7 @@ class sac:
             #y_pi = self.modelp(inp_next, training = True)
             #log = tf.math.log(y_pi)
             #pol = tf.clip_by_value(pol,1e-10,1.0)
-            logpol = tf.math.log(pol)
+            #logpol = tf.math.log(pol)
             q, qt = [], []
 
             for i in range(self.nnets):
@@ -393,21 +393,21 @@ class sac:
             qe = tf.math.exp(minq1 - tf.reduce_max(minq1,axis=-1)[:,None])
             qsum1 = tf.reduce_sum(qe,axis=-1)
             qe = qe / qsum1[:,None]
-            qe = tf.clip_by_value(qe,1e-3,1.0)
+            qe = tf.clip_by_value(qe,1e-7,1.0)
             log = tf.math.log(qe)
 
-            acts = tf.random.categorical(logpol,1)
-            acts1 = tf.random.categorical(log,1)
+            #acts = tf.random.categorical(logpol,1)
+            #acts1 = tf.random.categorical(log,1)
 
-            nentr = self.alphav*logpol
-            nentr = tf.gather_nd(batch_dims=1,params = nentr,indices  = acts)
+            nentr = self.alphav*log*qe
+            #nentr = tf.gather_nd(batch_dims=1,params = nentr,indices  = acts)
             #kl = y_pii*(logpi-logpol)
+            nentr = tf.reduce_sum(nentr,axis=-1)
+            minq1  = tf.reduce_sum(qe*minq,axis=-1)
+            #minq1  = tf.gather_nd(batch_dims=1,params = minq,indices  = acts1)
 
-            #minq1  = tf.reduce_sum(y_pi*minq,axis=-1)
-            minq1  = tf.gather_nd(batch_dims=1,params = minq,indices  = acts1)
 
-
-            qvt = tf.nn.softsign(rew) + self.gamma*minq1*(1-dones)  - nentr
+            qvt = tf.nn.softsign(rew) + self.gamma*(minq1-nentr)*(1-dones)  #- nentr
 
             dif = []
             val = []
@@ -582,11 +582,12 @@ class sac:
                 #self.show()
                 if(self.index%32000==0):
                     plt.plot(self.xindex,self.rewardy)
-                    plt.savefig("./out/figure_rew8.png")
+                    plt.savefig("./out/figure_rew9.png")
                     plt.close()
                     df = pandas.DataFrame({'x': self.xindex, 'y': self.rewardy})
-                    df.to_excel('./out/file_name8.xlsx', index=False)
-                    plotv(self.xindex,self.rewardy,self.env.get_image())
+                    df.to_excel('./out/file_name9.xlsx', index=False)
+                    #plotv(self.xindex,self.rewardy,self.env.get_image())
+
 
 
         self.index = self.index+1
