@@ -19,12 +19,9 @@ from keras.datasets import mnist
 
 #tf.config.experimental.set_visible_devices(gpus[1], 'GPU')
 
-
-
 nw = 28
 nh = 28
 num_hide = 196
-
 
 # загружаем обучающий датасет
 (trainx, trainy), (testx, testy) = mnist.load_data()
@@ -34,7 +31,6 @@ all_image = numpy.expand_dims(all_image, axis=3)
 
 # преобразуем метки классов из вида 0..9 в бинарный вектор
 all_labels = krs.utils.to_categorical(trainy)
-
 
 print(all_image.shape)
 
