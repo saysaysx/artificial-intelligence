@@ -8,15 +8,17 @@ import matplotlib.pyplot as plt
 import tensorflow.keras as krs
 import numpy
 import pandas as pd
-
+import tensorflow as tf
 from keras.datasets import mnist
 
 # функция устанавливающая обучаемость слоев модели, False - веса фиксированные
-def trainable(model, flag):
-    model.trainable = flag
-    for l in model.layers:
-        l.trainable = flag
-    return
+
+#print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+#gpus = tf.config.list_physical_devices('GPU')
+#print("GPUs Available: ", gpus)
+
+#tf.config.experimental.set_visible_devices(gpus[1], 'GPU')
+
 
 
 nw = 28
@@ -59,9 +61,6 @@ lay_out = krs.layers.Dense(1, activation="sigmoid", name='den4')(lay)
 
 # определяем модель дескриминатора
 descriminator = krs.Model([desc_input,desc_input1], lay_out)
-descriminator.trainable = True
-descriminator.compile(loss='binary_crossentropy', optimizer=krs.optimizers.Adam(learning_rate = 0.0002),
-                      metrics=['accuracy'])
 
 # создаем сеть генератора с двумя входами
 gen_input = krs.layers.Input(shape=(num_hide,),name = 'ginp1')
@@ -79,27 +78,24 @@ lay_out = krs.layers.Conv2D(1, (3, 3), activation='tanh', padding='same',name = 
 # создание модели генератора
 generator = krs.Model([gen_input,gen_input1],lay_out)
 
-
-
 # сохраняем полученные модели
 krs.utils.plot_model(descriminator, to_file='./out/descriminator.png', show_shapes=True)
 krs.utils.plot_model(generator, to_file='./out/generator.png', show_shapes=True)
 
-#  отключаем обучение весов дескриминатора
-descriminator.trainable = False
-
 # создаем объединенную сеть дескриминатора и генератора
+
 gan = descriminator([generator.layers[-1].output, gen_input1])
 gan_model = krs.Model(inputs=[gen_input, gen_input1], outputs=gan)
 # binary_crossentropy
-gan_model.compile(loss='binary_crossentropy', optimizer=krs.optimizers.Adam(learning_rate=0.0002),
-                  metrics=['accuracy'])
+
+optimizerd = krs.optimizers.Adam(learning_rate=0.0001,clipnorm=1.0)
+optimizerg = krs.optimizers.Adam(learning_rate=0.0001,clipnorm=1.0)
 
 krs.utils.plot_model(gan_model, to_file='./out/gan_model.png', show_shapes=True)
 
-n_learn = 6000
+n_learn = 10000
 n_batch = 32
-n_batch_check = 4000
+n_batch_check = 2000
 ones = numpy.ones((n_batch, 1))   -1e-13
 zeros = numpy.zeros((n_batch, 1))   +1e-13
 oz = numpy.concatenate([ones, zeros])
@@ -132,6 +128,31 @@ print("Start learning!!!")
 values = numpy.arange(all_image.shape[0])
 values_cl = numpy.arange(10)
 
+@tf.function
+def train_descriminator(rf,labels,oz):
+    with tf.GradientTape() as tape:
+        d = descriminator([rf,labels],training = True)
+        loss = - tf.reduce_mean(oz*tf.math.log(d+1.0e-12)+(1.0-oz)*tf.math.log(1.0-d+1.0e-12))
+        trainable_vars = descriminator.trainable_variables
+    grads = tape.gradient(loss, trainable_vars)
+    optimizerd.apply_gradients(zip(grads, trainable_vars))
+    return loss
+
+@tf.function
+def train_gan(rx,fake_labels):
+    with tf.GradientTape() as tape:
+        d = gan_model([rx,fake_labels],training = True)
+        loss = - tf.reduce_mean(tf.math.log(d+1e-12))
+
+        trainable_vars = generator.trainable_variables
+    grads = tape.gradient(loss, trainable_vars)
+    optimizerg.apply_gradients(zip(grads, trainable_vars))
+    return loss
+
+
+
+
+
 for i_learn in range(n_learn):
     # выбираем батч реальных образов и меток их классов
 
@@ -140,13 +161,11 @@ for i_learn in range(n_learn):
     real_image = all_image[indexes]
     real_labels = all_labels[indexes]
 
-
     # генерируем вектора скрытого пространства и метки классов
     rx = numpy.random.randn(n_batch, num_hide)
 
     fake_labels = numpy.random.randint(0, 10, n_batch)
     fake_labels = krs.utils.to_categorical(fake_labels, num_classes = 10)
-
 
     # получаем генерируемые образы
     fake_image = generator.predict([rx,fake_labels], batch_size=n_batch, verbose = 0)
@@ -155,15 +174,22 @@ for i_learn in range(n_learn):
     rf = numpy.concatenate([real_image,fake_image])
     oz = numpy.concatenate([ones,zeros])
 
-
     # склеиваем метки реальных и фейковых образов
     labels = numpy.concatenate([real_labels,fake_labels])
-
     # обучаем дескриминатор
-    dloss = descriminator.train_on_batch([rf,labels], oz)
+
+
+    rf = tf.cast(rf,tf.float32)
+    labels = tf.cast(labels,tf.float32)
+    oz = tf.cast(oz,tf.float32)
+    dloss = train_descriminator(rf,labels,oz)
+
 
     # обучаем генератор
-    gloss1 = gan_model.train_on_batch([rx,fake_labels], ones)
+    #gloss1 = gan_model.train_on_batch([rx,fake_labels], ones)
+    rx = tf.cast(rx,tf.float32)
+    fake_labels = tf.cast(fake_labels,tf.float32)
+    gloss1 = train_gan(rx,fake_labels)
 
 
     zo = numpy.concatenate([zeros,ones])
@@ -225,14 +251,14 @@ for i_learn in range(n_learn):
         inp_dec = rx
         pred_dec = generator.predict([inp_dec, fake_labels], verbose=0)
 
-        if(i_learn%10000 ==0):
+        if(i_learn%2000 ==0):
             fig = plt.figure(figsize = (5,5))
             for i in range(16):
                 ax[i] = fig.add_subplot(4, 4, i + 1)
                 ax[i].imshow((pred_dec[i][:, :, 0]+1)*0.5)
 
 
-plt.show()
+            plt.show()
 
 # отображаем поведение энтропии в процессе обучения
 error  = numpy.array(error)
