@@ -1,7 +1,6 @@
 
 # MIT License
 # Copyright (c) 2023 saysaysx
-
 # Conditional GAN
 
 import matplotlib.pyplot as plt
