@@ -83,7 +83,8 @@ class environment():
         #self.env = gym.make("Breakout-ram-v4", render_mode="rgb_array")
         #self.env = gym.make("MsPacman-ram-v4", render_mode="rgb_array")
         #self.env = gym.make("Assault-ram-v0", render_mode="rgb_array")
-        self.env = gym.make("Pong-ram-v0", render_mode="rgb_array")
+        #self.env = gym.make("Pong-ram-v0", render_mode="rgb_array")
+        self.env = gym.make("Breakout-ramDeterministic-v4", render_mode="rgb_array")
         self.env = gym.wrappers.FrameStack(self.env,num_stack=4)
         print(self.env.action_space.n)
         self.n_action = self.env.action_space.n
@@ -382,15 +383,15 @@ class sac:
         tf.keras.utils.plot_model(self.modelp, to_file='./out/netp.png', show_shapes=True)
 
 
-        self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.0001)
-        self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.0001)
+        self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.00025)
+        self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.00025)
         self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.0002)
 
         self.optimizera = tf.keras.optimizers.Adam(learning_rate=0.0002)
         self.optimizeraq = tf.keras.optimizers.Adam(learning_rate=0.0002)
         self.optimizerap = tf.keras.optimizers.Adam(learning_rate=0.0002)
 
-        self.alphav = tf.Variable(0.005)
+        self.alphav = tf.Variable(0.01)
         self.amaxrew = tf.Variable(0.0)
         self.alpha_val = tf.Variable(0.0)
         self.alphat = tf.constant([0.009,0.009,0.009,0.009,0.009])
@@ -512,9 +513,9 @@ class sac:
 
             #rewenc = tf.where(difenc>difmean, - tf.math.log(yp)*difenc*100,0.0)
             coef = tf.where(rewards > self.amaxrew*0.95, tf.random.uniform((1,),1.0,2.0), 1.0)
-            #if(tf.random.uniform((1,),0,1)>0.99):
-            #    coef = tf.random.uniform((self.T,),0.0,4)
-            #coef = 1.0
+            if(tf.random.uniform((1,),0,1)>0.99):
+                coef = tf.random.uniform((self.T,),0.0,4)
+
 
             #if(tf.random.uniform((1,),0,1)>0.999):
             #    coef = tf.random.uniform((self.T,),-2.0,2)
@@ -544,9 +545,6 @@ class sac:
             #sumq = tf.reduce_sum(targst,axis=0)
             #sumq = sumq - maxq - minq
             #minq = sumq/(self.nnets-2)
-
-
-
 
 
             qe = self.modelp(inp_next)
@@ -637,7 +635,8 @@ class sac:
             minq1 = minq
 
             maxx = tf.reduce_max(minq1,axis=-1)[:,None]
-            qe = tf.exp((minq1-maxx)/self.alphav)
+            alpha = maxx / 350.0
+            qe = tf.exp((minq1-maxx)/alpha)
 
             qsum1 = tf.reduce_sum(qe,axis=-1)
             qe = (qe+1e-5) / (qsum1[:,None]+1e-5*self.len_act)
@@ -673,10 +672,10 @@ class sac:
         #else:
         #    coef = tf.random.uniform((self.T,),245.0,255.0)
 
-        #with tf.GradientTape(persistent=True) as tape3:
-        #    minq1 = minq/self.alphav
-        #    rast = tf.reduce_max(minq1,axis=-1)
-        #    lossh = tf.reduce_mean(tf.nn.relu(rast-450.0))
+        with tf.GradientTape(persistent=True) as tape3:
+            minq1 = minq/self.alphav
+            rast = tf.reduce_max(minq1,axis=-1)
+            lossh = tf.reduce_mean(tf.nn.relu(rast-250.0))
 
 
 
@@ -712,8 +711,8 @@ class sac:
 
 
 
-        #gradsb = tape3.gradient(lossh, [self.alphav])
-        #self.optimizer3.apply_gradients(zip(gradsb,[self.alphav]))
+        gradsb = tape3.gradient(lossh, [self.alphav])
+        self.optimizer3.apply_gradients(zip(gradsb,[self.alphav]))
         return  lossp, tf.reduce_mean(entr), tf.reduce_max(minq)
 
     @tf.function

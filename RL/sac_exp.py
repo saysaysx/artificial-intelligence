@@ -68,8 +68,8 @@ def steps(n):
 
 class environment():
     def __init__(self):
-        self.env = gym.make("Breakout-ram-v4", render_mode="rgb_array")
-        #self.env = gym.make("MsPacman-ram-v4", render_mode="rgb_array")
+        #self.env = gym.make("Breakout-ram-v4", render_mode="rgb_array")
+        self.env = gym.make("MsPacman-ram-v4", render_mode="rgb_array")
 
         self.env = gym.wrappers.FrameStack(self.env,num_stack=4)
         print(self.env.action_space.n)
@@ -266,7 +266,7 @@ class sac:
 
         @register_keras_serializable()
         def scale(x):
-            y = x+5e-3
+            y = x+4.0e-3
             sumy = tf.reduce_sum(y,axis=-1)[:,None]
             y = y/sumy
             return y
@@ -522,9 +522,6 @@ class sac:
         if self.buf_index>=self.n_buffer:
             self.buf_index = 0
             self.flag_buf = True
-
-        return
-
 
     def step(self):
 

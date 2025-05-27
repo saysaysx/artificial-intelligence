@@ -22,6 +22,7 @@ from tensorflow.keras.layers import Dense, Input, concatenate, BatchNormalizatio
 from tensorflow.keras.layers import MaxPooling1D, Permute, Conv1D, LSTM, LeakyReLU, Cropping1D, Multiply, Softmax, GaussianNoise
 from tensorflow.keras.layers import RepeatVector, Subtract, Embedding
 import tensorflow as tf
+from tensorflow.keras import regularizers
 import keras.backend as K
 
 numpy.set_printoptions(precision=4)
@@ -123,9 +124,6 @@ class environment():
 
         self.field = next_observation
 
-
-
-
     def get_image(self):
         x = self.env.render()
 
@@ -197,11 +195,11 @@ class sac:
 
         lay = rescale(inp1)
 
-        lay = Dense(300, activation = 'relu') (lay)
-        lay = Dense(200, activation = 'relu') (lay)
-        lay = Dense(100, activation = 'relu') (lay)
-        lay = Dense(50, activation = 'relu') (lay)
-        layv1 = Dense(self.len_act, activation = 'elu') (lay)
+        lay = Dense(350, activation = 'relu') (lay)
+        lay = Dense(250, activation = 'relu') (lay)
+        lay = Dense(150, activation = 'relu') (lay)
+        lay = Dense(150, activation = 'relu') (lay)
+        layv1 = Dense(self.len_act, activation = 'linear') (lay)
 
 
         self.nnets = 2
@@ -210,22 +208,22 @@ class sac:
 
         tf.keras.utils.plot_model(self.modelq[0], to_file='./out/netq.png', show_shapes=True)
 
-
-        self.modelq[1] = keras.models.clone_model(self.modelq[0])
+        for i in range(1,self.nnets):
+            self.modelq[i] = keras.models.clone_model(self.modelq[0])
 
         print("------------")
         print(self.shape_state)
-        self.step_s = steps(4)
+        self.step_s = steps(2)
 
         inp1 = Input(shape = self.shape_state, dtype='uint8' )
 
         lay = rescale(inp1)
         coefv = 1e-3*self.len_act
 
-        lay = Dense(300, activation = 'relu') (lay)
-        lay = Dense(200, activation = 'relu') (lay)
-        lay = Dense(100, activation = 'relu') (lay)
-        lay = Dense(50, activation = 'relu') (lay)
+        lay = Dense(350, activation = 'relu') (lay)
+        lay = Dense(250, activation = 'relu') (lay)
+        lay = Dense(150, activation = 'relu') (lay)
+        lay = Dense(150, activation = 'relu') (lay)
         layp1 = Dense(self.len_act, activation="softmax") (lay)
         self.modelp = keras.Model(inputs=inp1, outputs=layp1)
 
@@ -263,11 +261,17 @@ class sac:
 
         self.optimizer1 = tf.keras.optimizers.Adam(learning_rate=0.00025)
         self.optimizer2 = tf.keras.optimizers.Adam(learning_rate=0.00025)
-        self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.0009)
+        self.optimizer3 = tf.keras.optimizers.Adam(learning_rate=0.00025)
+        self.optimizer4 = tf.keras.optimizers.Adam(learning_rate=0.002)
 
-        self.alphav = tf.Variable(0.01)
+        self.alphav = tf.Variable(0.02)
         self.border = tf.Variable(0.1)
+        self.std_rnd = tf.Variable(1.0)
+        self.mean_rnd = tf.Variable(0.0)
+        self.bettav = tf.Variable(0.0)
 
+        self.mean_crt = [tf.Variable(1.0), tf.Variable(1.0)]
+        self.mean_act = tf.Variable(1.0)
 
         self.cur_reward = 0.0
         self.max_reward = 1.0
@@ -275,6 +279,9 @@ class sac:
         self.cur_reward100 = 0.0
         self.cur_reward10 = 0.0
         self.num_games = 0
+        trainable_val = self.modelq[0].trainable_variables + self.modelq[1].trainable_variables
+        self.grad_accum = [tf.Variable(tf.zeros_like(v), trainable=False) for v in trainable_val]
+
 
 
         self.nwin = "Main"
@@ -321,94 +328,157 @@ class sac:
         with tf.GradientTape(persistent=True) as tape1:
             qv, targ, tqv  = [], [], []
 
-            for i in range(2):
+            for i in range(self.nnets):
                 qvl = self.modelq[i](inp, training = True)
                 qv.append(qvl)
                 val = self.targetq[i](inp_next, training = True)
                 targ.append(val)
-                tqv.append(self.targetq[i](inp, training = True))
+                #tqv.append(self.targetq[i](inp, training = True))
 
             y_pi = self.modelp(inp_next, training = True)
-            #log = tf.math.log(y_pi)
+            y_pii = self.modelp(inp, training = True)
+            y_pii = tf.clip_by_value(y_pii,1e-10,1.0)
+            log = tf.math.log(y_pi)
+
+            logpi = tf.math.log(y_pii)
             pol = tf.clip_by_value(pol,1e-10,1.0)
             logpol = tf.math.log(pol)
             q, qt = [], []
 
-            for i in range(2):
+            for i in range(self.nnets):
                 q.append(tf.gather_nd(batch_dims=1,params = qv[i],indices  = actn))
-                qt.append( tf.gather_nd(batch_dims=1,params = tqv[i],indices  = actn))
+                #qt.append( tf.gather_nd(batch_dims=1,params = tqv[i],indices  = actn))
 
-            minq = tf.minimum(targ[0] , targ[1])
-            nentr = tf.reduce_sum(self.alphav*logpol*pol, axis = -1)
+            minq  = tf.minimum(targ[0] , targ[1])
 
-            hash = self.hash_model([inp,actn], training = True)
-            rndhash = self.rnd_model([inp,actn], training = True)
-            difhash = tf.reduce_mean(tf.math.square(hash-rndhash))
 
-            dift1 = tf.reduce_sum(minq*y_pi, axis=-1)
+
+            nentr = self.alphav*logpi*y_pii
+            kl = y_pii*(logpi-logpol)
+
+
+            #hash = self.hash_model([inp,actn], training = True)
+
+            #rndhash = self.rnd_model([inp,actn], training = True)
+            #difhash = tf.reduce_mean(tf.math.square(hash-rndhash), axis=-1)
+            #losshash = tf.reduce_mean(difhash)
+
+            #acts = tf.random.categorical(log,1)
+            #acts = tf.math.argmax(minq,axis=-1)[:,None]
+
+            #minq1 = tf.gather_nd(batch_dims=1,params = minq,indices  = acts)
+
+            #entr  = tf.gather_nd(batch_dims=1,params = nentr,indices  = actn)
+            #klg = tf.gather_nd(batch_dims=1,params = kl,indices  = actn)
+
+            minq1  = tf.reduce_sum(y_pi*minq,axis=-1)
+            entr = tf.reduce_sum(nentr,axis=-1)
+            klg =  tf.reduce_sum(kl,axis=-1)
+            klg = tf.nn.relu(klg-0.1)
             # anti exploration
-            qvt = rew+self.gamma*dift1*(1-dones) - nentr - difhash
+            self.bettav.assign(tf.maximum(tf.reduce_max(rew),self.bettav))
+            qvt = rew/self.bettav +self.gamma*minq1*(1-dones) - entr - klg*0.1
+
+
+
             dif = []
-            for i in range(2):
-                dif1a = tf.math.square(q[i]-qvt)
-                #dif1b = tf.math.square(qt[i]+tf.clip_by_value(q[i]-qt[i],-self.border,self.border)-qvt)
-                #dif.append(tf.reduce_mean(tf.maximum(dif1a,dif1b)))
-                dif.append(tf.reduce_mean(dif1a))
+            val = []
+            dif1a = tf.reduce_mean(tf.math.square(q[0]-qvt))
+            dif1b = tf.reduce_mean(tf.math.square(q[1]-qvt))
+
+
+            dif = [dif1a,dif1b]
+
 
 
             lossq = tf.reduce_mean(tf.convert_to_tensor(dif,tf.float32))
-            trainable_varsa = self.modelq[0].trainable_variables+self.modelq[1].trainable_variables
-            trainable_varsb = self.rnd_model.trainable_variables
+            trainable_varsa = self.modelq[0].trainable_variables + self.modelq[1].trainable_variables
+            #trainable_varsb = self.rnd_model.trainable_variables
 
         gradsa = tape1.gradient(lossq, trainable_varsa)
-        self.optimizer1.apply_gradients(zip(gradsa, trainable_varsa))
-
-        gradsb = tape1.gradient(difhash, trainable_varsb)
-        self.optimizer3.apply_gradients(zip(gradsb, trainable_varsb))
+        self.grad_accum = [acc.assign(acc+g) for acc, g in zip(self.grad_accum, gradsa)]
 
 
-        return difhash
+        #gradsa = [grad for grad in gradsa]
+        #if self.bettav>3:
+        #    self.optimizer1.apply_gradients(zip(self.grad_accum, trainable_varsa))
+        #    self.grad_accum = [grad*0.0 for grad in gradsa]
+        #    self.bettav.assign(0.0)
+
+        #gradsb = tape1.gradient(losshash, trainable_varsb)
+        #self.optimizer3.apply_gradients(zip(gradsb, trainable_varsb))
+
+
+        return self.bettav
+
+    @tf.function
+    def apply_grads(self):
+        trainable_varsa = self.modelq[0].trainable_variables + self.modelq[1].trainable_variables
+        grads = [grad/2.0 for grad in self.grad_accum]
+        self.optimizer1.apply_gradients(zip(grads, trainable_varsa))
+        for acc in self.grad_accum:
+            acc.assign(tf.zeros_like(acc))
+
 
 
 
 
     @tf.function
     def train_actor1(self, inp, pol, val):
-        with tf.GradientTape() as tape2:
+        with tf.GradientTape(persistent=True) as tape2:
 
             qv, qvt = [], []
-            for i in range(2):
+            for i in range(self.nnets):
                 qv.append(self.modelq[i](inp, training = True))
                 qvt.append(val)
             y_pii = self.modelp(inp, training = True)
-            y_pii = tf.clip_by_value(y_pii,1e-10,1.0)
+            y_pii = tf.clip_by_value(y_pii,1e-20,1.0)
             logpi = tf.math.log(y_pii)
+            #pol = tf.clip_by_value(pol,1e-10,1.0)
+            #logpol = tf.math.log(pol)
+
+
             entr = - tf.reduce_mean(tf.reduce_sum(y_pii*logpi, axis=-1))
-            minq = tf.minimum(qv[0], qv[1])
-            minq = minq/self.alphav
-            qe = tf.math.exp(minq-tf.reduce_max(minq,axis=-1)[:,None])
-            #qe = minq-tf.reduce_min(minq,axis=-1)[:, None]
-            qsum = tf.reduce_sum(qe,axis=-1)
-            qe = qe / qsum[:,None]
-            qe = tf.clip_by_value(qe,1e-10,1.0)
+
+
+            minq = tf.minimum(qv[0],qv[1])
+            #minq1 = minq/self.alphav
+            #qe = tf.math.exp(minq1 - tf.reduce_max(minq1,axis=-1)[:,None])
+            #qsum1 = tf.reduce_sum(qe,axis=-1)
+            #qe = qe / qsum1[:,None]
+            #qe = tf.clip_by_value(qe,1e-10,1.0)
             #logqe = tf.math.log(qe)
 
-            # difs of distributions
-            dif1 = 1 - tf.math.sqrt(y_pii*qe)
+            #f1 = tf.math.cumsum(y_pii,axis=-1)
+            #f2 = tf.math.cumsum(qe,axis=-1)
+            #g1 = tf.math.cumsum(y_pii,axis=-1, reverse=True)
+            #g2 = tf.math.cumsum(qe,axis=-1, reverse=True)
+            #dif1 = tf.math.square(f2-f1) + tf.math.square(g2-g1)
+            #difabs = tf.stop_gradient(tf.abs(dif1))
 
+            dif1 = tf.reduce_sum(y_pii*(logpi*self.alphav-minq),axis=-1)
 
-            difv = tf.reduce_mean(dif1)
-            lossp = difv
+            #dif1 = tf.reduce_sum(y_pii*(logpi-logqe1),axis=-1)*tf.reduce_sum(qe1*(logqe1-logpi),axis=-1)
+            #dif1 = tf.reduce_max(tf.math.abs(f2-f1),axis=-1)
+            lossp = tf.reduce_mean(dif1)
+            #lossbt = - tf.reduce_mean(dif2)
+
             trainable_vars2 = self.modelp.trainable_variables
+
+
         grads2 = tape2.gradient(lossp, trainable_vars2)
         self.optimizer2.apply_gradients(zip(grads2, trainable_vars2))
-        return  lossp, tf.reduce_mean(entr) , difv
+        #gradsb = tape2.gradient(lossbt, [self.bettav])
+        #self.optimizer4.apply_gradients(zip(gradsb, [self.bettav]))
+
+
+        return  lossp, tf.reduce_mean(entr) , lossp
 
 
     @tf.function
     def target_train(self):
-        tau = [0.005,0.005]
-        for i in range(2):
+        tau = [0.006,0.006]
+        for i in range(self.nnets):
             target_weights = self.targetq[i].trainable_variables
             weights = self.modelq[i].trainable_variables
             for (a, b) in zip(target_weights, weights):
@@ -434,11 +504,11 @@ class sac:
         val = tf.cast(self.qval[indices] ,tf.float32)
 
         lossq = self.train_q1(inp,inp_next,acts, rews, dones, pol)
+        if self.step_s():
+            self.apply_grads()
 
         lossp, entr, dif = self.train_actor1(inp, pol, val)
-
-
-        #time.sleep(0.05)
+        time.sleep(0.01)
 
         self.target_train()
         return lossq, lossp, entr, dif
@@ -488,6 +558,7 @@ class sac:
 
                 if self.cur_reward100 > self.max_reward:
                     self.max_reward = self.cur_reward100
+                    self.bettav.assign(self.max_reward)
                     self.modelqmax[0].set_weights(self.targetq[0].get_weights())
                     self.modelqmax[1].set_weights(self.targetq[1].get_weights())
 

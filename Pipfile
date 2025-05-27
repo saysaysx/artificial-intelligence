@@ -4,10 +4,10 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-keras =  "==2.8.0"
-tensorflow-gpu =  "==2.8.0"
-protobuf = "==3.20.1"
-numpy = "==1.23.0"
+keras =  "*"
+tensorflow-gpu =  "*"
+protobuf = "*"
+numpy = "*"
 matplotlib = "*"
 pandas = "*"
 pydot = "*"
@@ -19,8 +19,9 @@ gymnasium = {extras = ["classic_control", "atari"]}
 graphviz = "*"
 pydotplus = "*"
 openpyxl = "*"
+requests = "*"
 
 [dev-packages]
 
 [requires]
-python_version = "3.8"
+python_version = "3.10"
