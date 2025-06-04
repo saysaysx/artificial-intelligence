@@ -1,3 +1,4 @@
+
 # MIT License
 # Copyright (c) 2025 saysaysx
 # Conditional GAN
@@ -12,7 +13,7 @@ from tensorflow.keras import layers
 import io
 import zipfile
 from PIL import Image
-
+from tensorflow.keras.layers import SpectralNormalization
 
 def process_zip_archive(zip_path, target_dir='train/'):
     class_images = {}  # Словарь для хранения {класс: [изображения]}
@@ -78,7 +79,7 @@ def prepare_dataset(images_dict, target_size=(64, 64)):
     return x, y, class_to_label
 
 # Использование
-images = process_zip_archive(zip_path='Linnaeus.zip', target_dir='train/')
+images = process_zip_archive(zip_path='flowers.zip', target_dir='train/')
 x, y, class_mapping = prepare_dataset(images)
 
 print(f"Форма массива изображений: {x.shape}")  # (n_samples, 64, 64, 3)
@@ -93,7 +94,7 @@ print("GPUs Available: ", gpus)
 
 nw = 64
 nh = 64
-num_hide = 128
+num_hide = 256
 nclasses = len(class_mapping)
 
 
@@ -105,10 +106,16 @@ all_labels = krs.utils.to_categorical(y)
 print(all_image.shape)
 
 
+
+
+
+
+
+
 augmentation = tf.keras.Sequential([
         layers.RandomFlip("horizontal"),
-        layers.RandomRotation(0.01),
-        layers.RandomZoom((-0.15, 0.15)),
+        layers.RandomRotation(0.1),
+        layers.RandomZoom((-0.2, 0.2)),
 
     ])
 
@@ -116,27 +123,40 @@ augmentation = tf.keras.Sequential([
 # создаем сеть дескриминатор с двумя входами
 desc_input = krs.layers.Input(shape=(nw,nh,3),name = 'inpd1')
 # второй вход для метки класса образа
-desc_input1 = krs.layers.Input(shape=(nclasses,), name = 'inpd2')
-lay1 = krs.layers.Dense(16*16, name = 'd2') (desc_input1)
-lay1 = krs.layers.Reshape((16,16,1), name = 'd4') (lay1)
-lay1 = krs.layers.UpSampling2D(size=(4, 4), interpolation='nearest', name = 'd44') (lay1)
+
+#lay1 = krs.layers.Dense(16*16, name = 'd2') (desc_input1)
+#lay1 = krs.layers.Reshape((16,16,1), name = 'd4') (lay1)
+#lay1 = krs.layers.UpSampling2D(size=(4, 4), interpolation='nearest', name = 'd44') (lay1)
 # объединяем два параллельных слоя
-layc = krs.layers.Concatenate(name = 'd5') ([desc_input, lay1])
 
+lay = (krs.layers.Conv2D(64, (4, 4), strides = (2,2), padding='same',  use_bias=False))(desc_input)
+lay = layers.BatchNormalization(momentum= 0.999)(lay)
+lay = layers.LeakyReLU(0.2)(lay)
+lay = (krs.layers.Conv2D(64, (3, 3), strides = (1,1), padding='same',  use_bias=False))(desc_input)
+lay = layers.BatchNormalization(momentum= 0.999)(lay)
+lay = (krs.layers.Conv2D(128, (4, 4), strides = (2,2), padding='same', use_bias=False))(lay)
+lay = layers.BatchNormalization(momentum= 0.999)(lay)
+lay = layers.LeakyReLU(0.2)(lay)
+lay = (krs.layers.Conv2D(128, (3, 3), strides = (1,1), padding='same', use_bias=False))(lay)
+lay = layers.BatchNormalization(momentum= 0.999)(lay)
+lay = (krs.layers.Conv2D(256, (4, 4), strides = (2,2), padding='same', use_bias=False))(lay)
+lay = layers.BatchNormalization(momentum= 0.999)(lay)
+lay = layers.LeakyReLU(0.2)(lay)
+lay = (krs.layers.Conv2D(128, (3, 3), strides = (1,1), padding='same', use_bias=False))(lay)
+lay = layers.BatchNormalization(momentum= 0.999)(lay)
+lay = layers.LeakyReLU(0.2)(lay)
+lay = (krs.layers.Conv2D(512, (4, 4), strides = (2,2), padding='same', use_bias=False))(lay)
+#lay = layers.BatchNormalization(momentum= 0.999)(lay)
+lay = layers.LeakyReLU(0.2)(lay)
+lay = (krs.layers.Conv2D(512, (3, 3), strides = (1,1), padding='same', use_bias=False))(lay)
+lay = krs.layers.Flatten()(lay)
 
-lay = krs.layers.Conv2D(64, (5, 5), strides = (2,2), padding='same', name = 'd6')(layc)
-lay = layers.LeakyReLU(0.2)(lay)
-lay = krs.layers.Conv2D(128, (5, 5), strides = (2,2), padding='same', name = 'd7')(lay)
-lay = layers.BatchNormalization()(lay)
-lay = layers.LeakyReLU(0.2)(lay)
-lay = krs.layers.Conv2D(256, (5, 5), strides = (2,2), padding='same', name = 'd8')(lay)
-lay = layers.BatchNormalization()(lay)
-lay = layers.LeakyReLU(0.2)(lay)
-lay = krs.layers.Conv2D(512, (5, 5), strides = (2,2), padding='same', name = 'd9')(lay)
-lay = layers.BatchNormalization()(lay)
-lay = layers.LeakyReLU(0.2)(lay)
-lay = krs.layers.Flatten(name = 'd10')(lay)
-lay_out = krs.layers.Dense(1, activation="sigmoid", name='den4')(lay)
+desc_input1 = krs.layers.Input(shape=(nclasses,))
+lay2 = layers.Dense(10,activation = 'relu')(desc_input1)
+layc = krs.layers.Concatenate(name = 'd5') ([lay, lay2])
+
+lay_out = krs.layers.Dense(1, activation="linear")(layc)
+
 
 # определяем модель дескриминатора
 descriminator = krs.Model([desc_input,desc_input1], lay_out)
@@ -148,21 +168,30 @@ gen_input1 = krs.layers.Input(shape=(nclasses,),name = 'ginp2')
 
 layc = krs.layers.Concatenate(name = 'g3')([gen_input,gen_input1])
 lay = krs.layers.Dense(512*4*4,name = 'g4')(layc)
+lay = layers.BatchNormalization(momentum= 0.9, epsilon=1e-5)(lay, training=True)
 lay = krs.layers.Reshape(target_shape=(4,4,512),name = 'g5')(lay)
-lay = krs.layers.Conv2D(512, (5, 5),  padding='same', use_bias=False)(lay)
-lay = layers.BatchNormalization()(lay)
+lay = layers.Conv2DTranspose(512, (4,4), strides=(2,2), padding='same', use_bias=False)(lay)#krs.layers.Conv2D(512, (5, 5),  padding='same', use_bias=False)(lay)
+lay = layers.BatchNormalization(momentum= 0.9, epsilon=1e-5)(lay, training=True)
 lay = layers.LeakyReLU(0.2)(lay)
-lay = krs.layers.UpSampling2D(size=(4,4),name = 'g7', interpolation='bilinear')(lay)
-lay = krs.layers.Conv2D(256, (5, 5),  padding='same', use_bias=False)(lay)
-lay = layers.BatchNormalization()(lay)
+lay = layers.Conv2DTranspose(512, (3,3), strides=(1,1), padding='same', use_bias=False)(lay)#krs.layers.Conv2D(512, (5, 5),  padding='same', use_bias=False)(lay)
+lay = layers.BatchNormalization(momentum= 0.9, epsilon=1e-5)(lay, training=True)
+#lay = krs.layers.UpSampling2D(size=(4,4),name = 'g7', interpolation='bilinear')(lay)
+lay = layers.Conv2DTranspose(256, (4,4), strides=(2,2), padding='same', use_bias=False)(lay)
+lay = layers.BatchNormalization(momentum= 0.9, epsilon=1e-5)(lay, training=True)
 lay = layers.LeakyReLU(0.2)(lay)
-lay = krs.layers.UpSampling2D(size=(2,2), interpolation='bilinear')(lay)
-lay = krs.layers.Conv2D(128, (5, 5),  padding='same', use_bias=False)(lay)
-lay = layers.BatchNormalization()(lay)
-lay = layers.LeakyReLU(0.2)(lay)
-lay = krs.layers.UpSampling2D(size=(2,2), interpolation='bilinear')(lay)
+lay = layers.Conv2DTranspose(256, (3,3), strides=(1,1), padding='same', use_bias=False)(lay)
+lay = layers.BatchNormalization(momentum= 0.9, epsilon=1e-5)(lay, training=True)
 
-lay_out = krs.layers.Conv2D(3, (7, 7), activation='tanh', padding='same',name = 'g12')(lay)
+lay = layers.Conv2DTranspose(128, (4,4), strides=(2,2), padding='same', use_bias=False)(lay)
+lay = layers.BatchNormalization(momentum= 0.9, epsilon=1e-5)(lay, training=True)
+lay = layers.LeakyReLU(0.2)(lay)
+lay = layers.Conv2DTranspose(128, (3,3), strides=(1,1), padding='same', use_bias=False)(lay)
+lay = layers.BatchNormalization(momentum= 0.9, epsilon=1e-5)(lay, training=True)
+
+lay = krs.layers.UpSampling2D(size=(2,2),name = 'g7', interpolation='bilinear')(lay)
+
+
+lay_out = krs.layers.Conv2D(3, (3, 3), activation='tanh', padding='same')(lay)
 # создание модели генератора
 generator = krs.Model([gen_input,gen_input1],lay_out)
 
@@ -176,13 +205,13 @@ gan = descriminator([generator.layers[-1].output, gen_input1])
 gan_model = krs.Model(inputs=[gen_input, gen_input1], outputs=gan)
 # binary_crossentropy
 
-optimizerd = krs.optimizers.Adam(learning_rate=0.00003)
-optimizerg = krs.optimizers.Adam(learning_rate=0.00003)
+optimizerd = krs.optimizers.Adam(learning_rate=0.00001,beta_1=0.5, beta_2=0.9, clipnorm  = 1.0)
+optimizerg = krs.optimizers.Adam(learning_rate=0.00001,beta_1=0.5, beta_2=0.9, clipnorm  = 1.0)
 
 krs.utils.plot_model(gan_model, to_file='./out/gan_model.png', show_shapes=True)
 
 n_learn = 800000
-n_batch = 32
+n_batch = 64
 n_batch_check = 400
 ones = numpy.ones((n_batch, 1))   -1e-13
 zeros = numpy.zeros((n_batch, 1))   +1e-13
@@ -207,7 +236,7 @@ for i in range(16):
 
 ax = [[], [], [], [], [], [], [], [],[], [], [], [], [], [], [], []]
 # загружаем модель классификатора
-classificator = krs.models.load_model("./classifier.h5")
+classificator = krs.models.load_model("./classifier_fl.h5")
 
 error = []
 
@@ -217,29 +246,58 @@ values = numpy.arange(all_image.shape[0])
 values_cl = numpy.arange(10)
 
 @tf.function
-def train_descriminator(real_img,labels):
+def train_descriminator(real_img, real_labels):
     with tf.GradientTape() as tape:
         real_aug = augmentation(real_img)
-        real_out = descriminator([real_aug,labels],training = True)
+        real_out = descriminator([real_aug,real_labels],training = True)
         rx =  tf.random.normal(shape=(n_batch, num_hide))
-        fake_img = generator([rx,labels])
-        fake_out = descriminator([fake_img,labels],training = True)
-        e = 1e-8
-        fake_out = tf.clip_by_value(fake_out,0.0,1.0-e)
-        real_out = tf.clip_by_value(real_out,e,1.0)
+        fake_img = generator([rx,real_labels])
+        fake_out = descriminator([fake_img,real_labels],training = True)
+        #e = 1e-8
+        #fake_out = tf.clip_by_value(fake_out,0.0,1.0-e)
+        #real_out = tf.clip_by_value(real_out,e,1.0)
 
-        #loss_critic = tf.reduce_mean(fake_out) - tf.reduce_mean(real_out)
-        loss_critic = tf.reduce_mean(-tf.math.log(real_out) - tf.math.log(1-fake_out))
+        loss_critic = tf.reduce_mean(fake_out) - tf.reduce_mean(real_out)
+        #loss_critic = tf.reduce_mean(-tf.math.log(real_out) - tf.math.log(1-fake_out))
 
-        xval = tf.reduce_mean(tf.abs(real_img[:,None]-real_img[None,:]),axis=[-3,-2,-1])
-        fval = tf.abs(real_out[:,None]-real_out[None,:])[:,:,0]
-        penalty1 = tf.reduce_mean(tf.math.exp(fval-xval-5))
 
-        xval = tf.reduce_mean(tf.abs(fake_img[:,None]-fake_img[None,:]),axis=[-3,-2,-1])
-        fval = tf.abs(fake_out[:,None]-fake_out[None,:])[:,:,0]
-        penalty2 = tf.reduce_mean(tf.math.exp(fval-xval-5))
 
-        loss = loss_critic+penalty1+penalty2
+        # Gradient Penalty (WGAN-GP)
+        alpha = tf.random.uniform(shape=[n_batch, 1, 1, 1], minval=0., maxval=1.)
+        interpolated = real_img + alpha * (fake_img - real_img)
+        with tf.GradientTape() as tape_gp:
+            tape_gp.watch(interpolated)
+            pred_interpolated = descriminator([interpolated, real_labels], training=True)
+        grads = tape_gp.gradient(pred_interpolated, [interpolated])[0]
+        norm = tf.sqrt(tf.reduce_sum(tf.square(grads), axis=[1, 2, 3]))
+        gp = tf.reduce_mean((norm - 1.) ** 2)
+        lambda_gp = 1000.0
+        loss_critic += lambda_gp * gp
+
+
+
+        #xval = tf.reduce_mean(tf.abs(real_img[:,None]-real_img[None,:]),axis=[-3,-2,-1])
+        #fval = tf.abs(real_out[:,None]-real_out[None,:])[:,:,0]
+        #penalty1 = tf.reduce_mean(tf.math.exp(fval-xval-5))
+
+        #xval = tf.reduce_sum(tf.square(real_aug[0:-1]-real_aug[1:]),axis=[-3,-2,-1])
+        #fval = tf.abs(real_out[0:-1]-real_out[1:])
+        #penalty1 = tf.reduce_mean(tf.nn.relu(fval-xval))**5
+
+        #xval = tf.reduce_sum(tf.square(fake_img[0:-1]-fake_img[1:]),axis=[-3,-2,-1])
+        #fval = tf.abs(fake_out[0:-1]-fake_out[1:])
+        #penalty2 = tf.reduce_mean(tf.nn.relu(fval-xval))**5
+        #alpha = tf.random.uniform([real_aug.shape[0], 1, 1, 1], 0., 1.)
+        #images = real_aug*alpha + fake_img*(1-alpha)
+        #out = descriminator([images,real_labels],training = True)
+
+        #xval = tf.reduce_sum(tf.square(images[0:-1]-images[1:]),axis=[-3,-2,-1])
+        #fval = tf.abs(out[0:-1]-out[1:])
+
+        #penalty = tf.reduce_mean(tf.nn.relu(fval-xval))**5
+
+
+        loss = loss_critic#+penalty#penalty1+penalty2
 
         trainable_vars = descriminator.trainable_variables
     grads = tape.gradient(loss, trainable_vars)
@@ -252,18 +310,18 @@ def train_gan(fake_labels):
         rx =  tf.random.normal(shape=(n_batch, num_hide))
         img = generator([rx,fake_labels],training = True)
         d = descriminator([img,fake_labels], training = True)
-        e = 1e-12
-        d = tf.clip_by_value(d,e,1.0)
+        #e = 1e-8
+        #d = tf.clip_by_value(d,e,1.0)
 
-        xval = tf.reduce_mean(tf.abs(img[:,None]-img[None,:]),axis=[-3,-2,-1])
-        fval = tf.abs(d[:,None]-d[None,:])[:,:,0]
-        penalty = tf.reduce_mean(tf.math.exp(fval-xval-5))
+        #xval = tf.reduce_mean(tf.abs(img[:,None]-img[None,:]),axis=[-3,-2,-1])
+        #fval = tf.abs(d[:,None]-d[None,:])[:,:,0]
+        #penalty = tf.reduce_mean(tf.math.exp(fval-xval-5))
 
         #losscl = tf.reduce_mean(tf.nn.relu(img - 1)+ tf.nn.relu(-img))*100.0
-        #lp   =  - tf.reduce_mean(d)
-        lp = tf.reduce_mean(-tf.math.log(d))
+        lp   =  - tf.reduce_mean(d)
+        #lp = tf.reduce_mean(-tf.math.log(d))
 
-        loss = lp + penalty
+        loss = lp #+ penalty
 
 
         trainable_vars = generator.trainable_variables
@@ -280,21 +338,24 @@ for i in range(16):
 
 for i_learn in range(n_learn):
     # выбираем батч реальных образов и меток их классов
-    indexes = numpy.random.choice(values, size=n_batch, replace=False)
 
-    real_image = all_image[indexes]
-    real_labels = all_labels[indexes]
-    # генерируем вектора скрытого пространства и метки классов
+    for j in range(1):
+        indexes = numpy.random.choice(values, size=n_batch, replace=False)
+        real_image = all_image[indexes]
+        real_labels = all_labels[indexes]
 
-    real_image = tf.cast(real_image,tf.float32)
-    real_labels = tf.cast(real_labels,tf.float32)
-    dloss = train_descriminator(real_image,real_labels)
+        real_image = tf.cast(real_image,tf.float32)
+        real_labels = tf.cast(real_labels,tf.float32)
 
-    # обучаем генератор
-    gloss1 = train_gan(real_labels)
+        # обучаем дескриминатор
+        dloss = train_descriminator(real_image,real_labels)
 
 
-    zo = numpy.concatenate([zeros,ones])
+    for j in range(1):
+
+        # обучаем генератор
+        gloss1 = train_gan(real_labels)
+
 
     # контроль обучения, сохранение результатов
     if (i_learn % 1000 == 0 ):
@@ -306,19 +367,15 @@ for i_learn in range(n_learn):
         rx = numpy.random.normal(0, 1, (n_batch_check, num_hide))#numpy.random.randn(n_batch, num_hide)
         inp_dec =  rx
 
-        fake_labels = numpy.random.randint(0, nclasses, n_batch_check)
-        fake_labels = krs.utils.to_categorical(fake_labels, num_classes = nclasses)
-
-
-        fake_image = generator.predict([inp_dec, fake_labels], verbose=0)
+        fake_image = generator.predict([inp_dec, real_labels], verbose=0)
         images = numpy.concatenate([real_image, fake_image])
 
-        labels = numpy.concatenate([real_labels,fake_labels])
+        labels = numpy.concatenate([real_labels,real_labels])
         pred = descriminator.predict_on_batch([images, labels])
         dloss = numpy.abs(pred - oz_c).mean()
 
         # для расчета gloss
-        ans_gan = gan_model.predict_on_batch([inp_dec,fake_labels])
+        ans_gan = gan_model.predict_on_batch([inp_dec,real_labels])
 
         # получаем метки сгенерированных образов с помощью предобученного классификатора
         ans_cls = classificator.predict_on_batch(fake_image)
@@ -330,8 +387,10 @@ for i_learn in range(n_learn):
         parr = arr/arr.sum()+1e-20
         # считаем энтропию
         H = (parr*numpy.log(1/parr)).sum()
+        entr = - ((ans_cls*numpy.log(ans_cls)).sum(axis=1)).mean()
+
         error.append([i_learn, H , dloss])
-        print(f"entropy {H}")
+        print(f"entropy of classificator {entr} entropy of image disribution {H} ")
 
         gloss = numpy.abs(ans_gan - ones_c).mean()
 
