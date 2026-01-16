@@ -10,7 +10,6 @@ from datetime import datetime
 import os
 
 
-
 # Убедитесь, что директория вывода существует
 os.makedirs('./out', exist_ok=True)
 
